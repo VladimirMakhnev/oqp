@@ -472,6 +472,7 @@ class Gradient(Calculator):
             'tda': oqp.tdhf_z_vector,
             'sf': oqp.tdhf_sf_z_vector,
             'mrsf': oqp.tdhf_mrsf_z_vector,
+            'umrsf': oqp.tdhf_umrsf_z_vector,
         }
 
         self.grad_func = {
@@ -480,6 +481,7 @@ class Gradient(Calculator):
             'tda': oqp.tdhf_gradient,
             'sf': oqp.tdhf_sf_gradient,
             'mrsf': oqp.tdhf_mrsf_gradient,
+            'umrsf': oqp.tdhf_umrsf_gradient,
         }
 
     def gradient(self):
@@ -509,7 +511,7 @@ class Gradient(Calculator):
         return grads
 
     def tddft_grad(self):
-        if self.td not in ['rpa', 'tda', 'sf', 'mrsf']:
+        if self.td not in ['rpa', 'tda', 'sf', 'mrsf','umrsf']:
             raise ValueError(f'Unknown tdhf type {self.td}')
 
         if self.nstate < max(self.grads):

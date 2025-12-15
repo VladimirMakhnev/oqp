@@ -35,6 +35,16 @@ contains
     call tdhf_mrsf_gradient(inf)
   end subroutine tdhf_mrsf_gradient_c
 
+  subroutine tdhf_umrsf_gradient_C(c_handle) bind(C, name="tdhf_umrsf_gradient")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    inf => oqp_handle_get_info(c_handle)
+    inf%tddft%umrsf = .true.
+    call tdhf_mrsf_gradient(inf)
+  end subroutine tdhf_umrsf_gradient_c
+
   subroutine tdhf_mrsf_gradient(infos)
     use io_constants, only: iw
     use oqp_tagarray_driver

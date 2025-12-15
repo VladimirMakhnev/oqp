@@ -493,6 +493,16 @@ contains
     call tdhf_mrsf_z_vector(inf)
   end subroutine tdhf_mrsf_z_vector_C
 
+  subroutine tdhf_umrsf_z_vector_C(c_handle) bind(C, name="tdhf_umrsf_z_vector")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    inf => oqp_handle_get_info(c_handle)
+    inf%tddft%umrsf = .true.
+    call tdhf_mrsf_z_vector(inf)
+  end subroutine tdhf_umrsf_z_vector_C
+
   subroutine tdhf_mrsf_z_vector(infos)
     use precision, only: dp
     use io_constants, only: iw
@@ -507,7 +517,7 @@ contains
     use int2_compute, only: int2_compute_t
     use tdhf_lib, only: int2_td_data_t
     use tdhf_lib, only: int2_tdgrd_data_t
-    use tdhf_mrsf_lib, only: int2_mrsf_data_t
+    use tdhf_mrsf_lib, only: int2_mrsf_data_t,int2_umrsf_data_t
     use tdhf_lib, only: iatogen, mntoia
     use tdhf_sf_lib, only: sfrorhs, &
       sfromcal, sfrogen, sfrolhs, pcgrbpini, &
@@ -521,7 +531,8 @@ contains
 
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
-      mrsfqrorhs, mrsfqropcal, mrsfqrowcal
+      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, &
+      umrsfdmat, umrsfsp
     use oqp_linalg
     use printing, only: print_module_info
 
@@ -553,16 +564,19 @@ contains
     integer :: iter, gmres_iter
     real(kind=dp) :: cnvtol, scale_exch, scale_exch2
     logical :: roref = .false.
+    logical :: uref  = .false.
     integer :: mrst
 
     type(int2_compute_t) :: int2_driver
     type(int2_mrsf_data_t), allocatable, target :: int2_data_st
+    type(int2_umrsf_data_t), allocatable, target :: int2_udata_st
     type(int2_td_data_t), allocatable, target :: int2_data_q
     class(int2_td_data_t), allocatable, target :: int2_data
     type(dft_grid_t) :: molGrid
 
   ! scr data
     real(kind=dp), allocatable, target :: wrk1(:,:), wrk2(:,:), wrk3(:,:)
+    real(kind=dp), allocatable, target :: wrk2a(:,:), wrk2b(:,:)
     real(kind=dp), pointer :: wrk1t(:)
 
   ! SF-TD Gradient data
@@ -582,14 +596,18 @@ contains
     ! tagarray
     real(kind=dp), contiguous, pointer :: &
       fock_a(:), mo_a(:,:), mo_energy_a(:), &
-      fock_b(:), mo_b(:,:), &
+      fock_b(:), mo_b(:,:), mo_energy_b(:), &
       td_p(:,:), td_t(:,:), ta(:), tb(:), td_abxc(:,:), &
       td_mrsf_den(:,:,:), bvec_mo(:,:), wao(:), mrsf_energies(:)
     character(len=*), parameter :: tags_alloc(4) = (/ character(len=80) :: &
       OQP_WAO, OQP_td_mrsf_density, OQP_td_p, OQP_td_abxc /)
-    character(len=*), parameter :: tags_required(8) = (/ character(len=80) :: &
-      OQP_FOCK_A, OQP_E_MO_A, OQP_VEC_MO_A, OQP_FOCK_B, OQP_VEC_MO_B, OQP_td_bvec_mo, OQP_td_t, &
-      OQP_td_energies /)
+    character(len=*), parameter :: tags_required(9) = (/ character(len=80) :: &
+      OQP_FOCK_A, OQP_E_MO_A, OQP_VEC_MO_A, OQP_FOCK_B, OQP_E_MO_B, OQP_VEC_MO_B, &
+      OQP_td_bvec_mo, OQP_td_t, OQP_td_energies /)
+
+    logical :: umrsf
+  ! variable of 2d dim of fmrst1
+    integer :: size_fmrst1
 
     mol_mult = infos%mol_prop%mult
     if (mol_mult/=3) call show_message(&
@@ -599,13 +617,21 @@ contains
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
 
+    if (scf_type==2) uref = .true.
+
+    umrsf = infos%tddft%umrsf
+
     dft = infos%control%hamilton == 20
 
   ! Files open
   ! 3. LOG: Write: Main output file
     open (unit=iw, file=infos%log_filename, position="append")
   !
-    call print_module_info('MRSF_TDHF_Z_Vector','Solving Z-Vector for MRSF-TDDFT')
+    if (umrsf) then
+        call print_module_info('UMRSF_TDHF_Z_Vector','Solving Z-Vector for UMRSF-TDDFT')
+    else 
+        call print_module_info('MRSF_TDHF_Z_Vector','Solving Z-Vector for MRSF-TDDFT')
+    endif
 
   ! Readings
 
@@ -629,11 +655,18 @@ contains
     nsocc = nocca-noccb
     lzdim = noccb*(nsocc+nvira)+nsocc*nvira
 
+  ! Def of size of fmrst1
+    if (umrsf) then
+        size_fmrst1 = 11
+    else
+        size_fmrst1 = 7
+    endif
+
     if(mrst==1 .or. mrst==3) then
       xvec_dim = nocca*nvirb
       allocate(&
     ! for Z-vector
-        fmrst1(1,7,nbf,nbf), &
+        fmrst1(1,size_fmrst1,nbf,nbf), &
         bvec_mo_d(xvec_dim,1), &
         hxa(nbf,nocca), &
         hxb(nbf,nbf), &
@@ -677,6 +710,8 @@ contains
 !   For scratch
       wrk1(nbf,nbf), &
       wrk2(nbf,nbf), &
+      wrk2a(nbf,nbf), &
+      wrk2b(nbf,nbf), &
       wrk3(nbf,nbf), &
       stat=ok, &
       source=0.0_dp)
@@ -686,7 +721,7 @@ contains
     call infos%dat%remove_records(tags_alloc)
 
     call infos%dat%reserve_data(OQP_WAO, TA_TYPE_REAL64, nbf_tri, comment=OQP_WAO_comment)
-    call infos%dat%reserve_data(OQP_td_mrsf_density, TA_TYPE_REAL64, nbf*nbf*7, (/7, nbf, nbf /), comment=OQP_td_mrsf_density)
+    call infos%dat%reserve_data(OQP_td_mrsf_density, TA_TYPE_REAL64, nbf*nbf*size_fmrst1, (/size_fmrst1, nbf, nbf /), comment=OQP_td_mrsf_density)
     call infos%dat%reserve_data(OQP_td_p, TA_TYPE_REAL64, nbf_tri*2, (/ nbf_tri, 2 /), comment=OQP_td_p)
     call infos%dat%reserve_data(OQP_td_abxc, TA_TYPE_REAL64, nbf*nbf, (/ nbf, nbf /), comment=OQP_td_abxc)
 
@@ -702,6 +737,7 @@ contains
     call tagarray_get_data(infos%dat, OQP_E_MO_A, mo_energy_a)
     call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
     call tagarray_get_data(infos%dat, OQP_VEC_MO_B, mo_b)
+    call tagarray_get_data(infos%dat, OQP_E_MO_B, mo_energy_b)
     call tagarray_get_data(infos%dat, OQP_td_bvec_mo, bvec_mo)
     call tagarray_get_data(infos%dat, OQP_td_t, td_t)
     call tagarray_get_data(infos%dat, OQP_td_energies, mrsf_energies)
@@ -726,7 +762,11 @@ contains
     ! Save unrelaxed density matrices and the `b=A*x` vector for target state
     if (mrst==1 .or. mrst==3 ) then
       call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-      call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb)
+      if (umrsf) then
+        call umrsfdmat(bvec_mo_d(:,1), td_abxc, mo_a, mo_b, ta, tb, nocca, noccb)
+      else 
+        call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb)
+      endif
     else if (mrst==5 ) then
       call sfdmat(bvec_mo(:,target_state), td_abxc, mo_a, tb, ta, noccb, nocca)
     end if
@@ -758,7 +798,7 @@ contains
 
   ! Prepare for ROHF
     ! Fock matrices A and B
-    if( roref )then
+    if( roref .or. uref )then
         wrk1t(1:nbf*nbf) => wrk1
   !   Alapha
       call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, wrk1)
@@ -781,24 +821,37 @@ contains
        scale_exch2 = infos%tddft%HFscale !> Response HF exchange
     end if
 
-    if (mrst==1 .or. mrst==3 ) then
-
-      int2_data_st = int2_mrsf_data_t( &
-          d3 = fmrst1, &
-          tamm_dancoff = .true., &
-          scale_exchange = scale_exch2, &
-          scale_coulomb = scale_exch2)
-
-    else if( mrst==5  )then
-
-      int2_data_q = int2_td_data_t( &
-          d2=bvec, &
-          int_apb = .false., &
-          int_amb = .false., &
-          tamm_dancoff = .true., &
-          scale_exchange = scale_exch2)
-
-    end if
+    if (umrsf) then
+      if (mrst==1 .or. mrst==3 ) then
+        int2_udata_st = int2_umrsf_data_t( &
+            d3 = fmrst1, &
+            tamm_dancoff = .true., &
+            scale_exchange = scale_exch2, &
+            scale_coulomb = scale_exch2)
+      else if( mrst==5  )then
+        int2_data_q = int2_td_data_t( &
+            d2=bvec, &
+            int_apb = .false., &
+            int_amb = .false., &
+            tamm_dancoff = .true., &
+            scale_exchange = scale_exch2)
+      endif
+    else
+      if (mrst==1 .or. mrst==3 ) then
+        int2_data_st = int2_mrsf_data_t( &
+            d3 = fmrst1, &
+            tamm_dancoff = .true., &
+            scale_exchange = scale_exch2, &
+            scale_coulomb = scale_exch2)
+      else if( mrst==5  )then
+        int2_data_q = int2_td_data_t( &
+            d2=bvec, &
+            int_apb = .false., &
+            int_amb = .false., &
+            tamm_dancoff = .true., &
+            scale_exchange = scale_exch2)
+      end if
+    endif
 
     int2_data = int2_tdgrd_data_t( &
         d2 = pa, &
@@ -837,34 +890,71 @@ contains
     if (mrst==1 .or. mrst==3) then
 
       call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
-      call mrsfcbc(infos, mo_a, mo_a, wrk1, fmrst1(1,:,:,:))
+      if (umrsf) then
+        call umrsfcbc(infos, mo_a, mo_b, wrk1, fmrst1(1,:,:,:))
+      else
+        call mrsfcbc(infos, mo_a, mo_a, wrk1, fmrst1(1,:,:,:))
+      endif
 
-      fmrst1(1,7,:,:) = td_abxc
+      if (umrsf) then 
+        fmrst1(1,11,:,:) = td_abxc
+        td_mrsf_den(1:11,:,:) = fmrst1(1,1:11,:,:)
+      else 
+        fmrst1(1,7,:,:) = td_abxc
+        td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
+      endif
 
-      td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
+      ! Initialize ERI calculations
+      if (umrsf) then
+        call int2_driver%run(int2_udata_st, &
+              cam = dft.and.infos%dft%cam_flag, &
+              alpha = infos%tddft%cam_alpha, &
+              alpha_coulomb = infos%tddft%cam_alpha, &
+              beta = infos%tddft%cam_beta,&
+              beta_coulomb = infos%tddft%cam_beta, &
+              mu = infos%tddft%cam_mu)
+      else
+        call int2_driver%run(int2_data_st, &
+              cam = dft.and.infos%dft%cam_flag, &
+             alpha = infos%tddft%cam_alpha, &
+              alpha_coulomb = infos%tddft%cam_alpha, &
+              beta = infos%tddft%cam_beta,&
+              beta_coulomb = infos%tddft%cam_beta, &
+              mu = infos%tddft%cam_mu)
+      endif
 
-    ! Initialize ERI calculations
-      call int2_driver%run(int2_data_st, &
-            cam = dft.and.infos%dft%cam_flag, &
-            alpha = infos%tddft%cam_alpha, &
-            alpha_coulomb = infos%tddft%cam_alpha, &
-            beta = infos%tddft%cam_beta,&
-            beta_coulomb = infos%tddft%cam_beta, &
-            mu = infos%tddft%cam_mu)
-      fmrst2 => int2_data_st%f3(:,:,:,:,1)! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
+!       call show_message('Can proceed futher?', with_abort)
+      if (umrsf) then
+        fmrst2 => int2_udata_st%f3(:,:,:,:,1)! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
+      else
+        fmrst2 => int2_data_st%f3(:,:,:,:,1)! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
+      endif
 
     ! Scaling factor if triplet
-      if (mrst==3) fmrst2(:,1:6,:,:) = -1.0_dp*fmrst2(:,1:6,:,:)
+      if (umrsf) then
+        if (mrst==3) fmrst2(:,1:10,:,:) = -1.0_dp*fmrst2(:,1:10,:,:)
+      else
+        if (mrst==3) fmrst2(:,1:6,:,:) = -1.0_dp*fmrst2(:,1:6,:,:)
+      endif
 
       ! Spin pair coupling
-      if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
-         fmrst2(:,6,:,:) = fmrst2(:,6,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
-      if (infos%tddft%spc_ovov /= infos%tddft%hfscale) &
-         fmrst2(:,5,:,:) = fmrst2(:,5,:,:) * infos%tddft%spc_ovov / infos%tddft%hfscale
-      if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
-         fmrst2(:,1:4,:,:) = fmrst2(:,1:4,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
-
-      call orthogonal_transform('n', nbf, mo_a, fmrst2(1,7,:,:), wrk2, wrk1)
+      if (umrsf) then
+        if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
+           fmrst2(:,10,:,:) = fmrst2(:,10,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
+        if (infos%tddft%spc_ovov /= infos%tddft%hfscale) &
+           fmrst2(:,9,:,:) = fmrst2(:,9,:,:) * infos%tddft%spc_ovov / infos%tddft%hfscale
+        if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
+           fmrst2(:,1:8,:,:) = fmrst2(:,1:8,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
+        call orthogonal_transform('n', nbf, mo_a, fmrst2(1,11,:,:), wrk2, wrk1)
+      else
+        if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
+           fmrst2(:,6,:,:) = fmrst2(:,6,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
+        if (infos%tddft%spc_ovov /= infos%tddft%hfscale) &
+           fmrst2(:,5,:,:) = fmrst2(:,5,:,:) * infos%tddft%spc_ovov / infos%tddft%hfscale
+        if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
+           fmrst2(:,1:4,:,:) = fmrst2(:,1:4,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
+        call orthogonal_transform('n', nbf, mo_a, fmrst2(1,7,:,:), wrk2, wrk1)
+      endif
 
       call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
 
@@ -880,7 +970,12 @@ contains
                  0.0_dp, hxb, nbf)
 
    ! spin pair ov-ov, co-co, co-ov coupling
-      call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+
+      if (umrsf) then 
+        call umrsfsp(hxa, hxb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+      else
+        call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+      endif
 
    !  Unrelaxed difference density matries T_ij and T_ab
    !  Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
