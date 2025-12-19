@@ -532,7 +532,7 @@ contains
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, &
-      umrsfdmat, umrsfsp
+      umrsfdmat, umrsfsp, umrsfromcal
     use oqp_linalg
     use printing, only: print_module_info
 
@@ -883,9 +883,15 @@ contains
         infos = infos)
 
 !   ALPHA: AO(M,N) -> MO(IA+)
-    call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+    if (umrsf) then
+       call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_b, nocca, nocca)
 
-    call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+       call mntoia(ab1(:,:,2), ab1_mo_b, mo_a, mo_b, noccb, noccb)
+    else
+       call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+
+       call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+    endif
 
     if (mrst==1 .or. mrst==3) then
 
@@ -1037,7 +1043,11 @@ contains
              &/3x,25("-")/)') trim(solver_name)
     call flush(iw)
 
-    call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
+    if (umrsf) then
+       call umrsfromcal(xm, xminv, mo_energy_a, mo_energy_b, fa, fb, nocca, noccb)
+    else
+       call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
+    endif
 
     ! Choose solver based on input option (0=CG, 1=GMRES)
     if (infos%tddft%z_solver == 1) then
@@ -1143,10 +1153,17 @@ contains
           infos = infos)
 
       !   ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
-      call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
 
-      wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
-      call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
+      if (umrsf) then
+          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_b, nocca, nocca)
+          wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
+          call mntoia(wrk1, ab1_mo_b, mo_a, mo_b, noccb, noccb)
+      else
+          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+          wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
+          call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
+      endif
+
 
       call sfrolhs(lhs, xk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
                    nocca, noccb)
@@ -1201,10 +1218,15 @@ contains
             infos = infos)
 
         !     ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
-        call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+        if (umrsf) then
+         call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_b, nocca, nocca)
 
-        call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
-
+         call mntoia(ab1(:,:,2), ab1_mo_b, mo_a, mo_b, noccb, noccb)
+        else
+         call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+ 
+         call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+        endif
         call sfrolhs(lhs, pk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
                      nocca, noccb)
 

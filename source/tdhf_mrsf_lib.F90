@@ -3061,78 +3061,130 @@ end subroutine umrsfmntoia
        
   subroutine umrsfdmat(bvec,abxc,mo_a,mo_b,ta,tb, &
                        noca,nocb)
-    use precision, only: dp
-    use tdhf_lib, only: iatogen
-    use mathlib, only: pack_matrix
+     use precision, only: dp
+     use tdhf_lib, only: iatogen
+     use mathlib, only: pack_matrix
+     use mathlib, only: orthogonal_transform
 
-    implicit none
+     implicit none
 
-    real(kind=dp), intent(in), dimension(:) :: bvec
-    real(kind=dp), intent(in), dimension(:,:) :: mo_a, mo_b
-    real(kind=dp), intent(inout), dimension(:,:) :: abxc
-    real(kind=dp), intent(out), dimension(:) :: ta, tb
-    integer, intent(in) :: noca, nocb
+     real(kind=dp), intent(in), dimension(:) :: bvec
+     real(kind=dp), intent(in), dimension(:,:) :: mo_a,mo_b
+     real(kind=dp), intent(inout), dimension(:,:) :: abxc
+     real(kind=dp), intent(out), dimension(:) :: ta, tb
+     integer, intent(in) :: noca, nocb
 
-    integer :: nvirb, nbf
-    real(kind=dp), allocatable, dimension(:,:) :: scr1, scr2
+     integer :: nvirb, nbf, nbf_tri, xvec_dim
+     real(kind=dp), allocatable, dimension(:,:) :: scr1, scr2
 
-    nbf = ubound(mo_a,1)
-    allocate(scr1(nbf,nbf), &
-             scr2(nbf,nbf), &
-             source=0.0_dp)
+     nbf = ubound(mo_a,1)
+     nbf_tri = ubound(ta,1)
+     xvec_dim = ubound(bvec,1)
+     allocate(scr1(nbf,nbf), &
+              scr2(nbf,nbf), &
+              source=0.0_dp)
 
-  ! MO(I+,A-) -> AO(M,N) using different alpha/beta MOs
-    nvirb = nbf-nocb
+   ! MO(I+,A-) -> AO(M,N)
+     nvirb = nbf-nocb
 
-    call iatogen(bvec,scr1,noca,nocb)
-    call dgemm('n','n',nbf,nbf,nbf, &
-               1.0_dp,mo_a,nbf, &
-                      scr1,nbf, &
-               0.0_dp,scr2,nbf)
-    call dgemm('n','t',nbf,nbf,nbf, &
-               1.0_dp,scr2,nbf, &
-                      mo_b,nbf, &
-               0.0_dp,abxc,nbf)
+     call iatogen(bvec,scr1,noca,nocb)
+     call dgemm('n','n', nbf, nbf, nbf, &
+                1.0_dp, mo_a, nbf, &   ! (nbf x nbf)
+                        scr1, nbf, &    ! (nbf x nbf)
+                0.0_dp, scr2, nbf)     ! scr2 = mo_a * scr1
+     call dgemm('n','t', nbf, nbf, nbf, &
+                1.0_dp, scr2, nbf, &   ! (nbf x nbf)
+                        mo_b, nbf, &    ! (nbf x nbf), используем транспонированную
+                0.0_dp, abxc, nbf)     ! abxc = scr2 * mo_b^T
 
-  ! Unrelaxed difference density matrix -----
+   ! Unrelaxed difference density matrix -----
 
-  ! OCC(Alpha)-OCC(Alpha)
-    call dgemm('n','t',noca,noca,nvirb, &
-              -1.0_dp,bvec,noca, &
-                      bvec,noca, &
-               0.0_dp,scr1,noca)
+   ! OCC(Alpha)-OCC(Alpha)
+     call dgemm('n','t',noca,noca,nvirb, &
+               -1.0_dp,bvec,noca, &
+                       bvec,noca, &
+                0.0_dp,scr1,noca)
 
-  ! MO(I+,J+) -> AO(M,N)
-    call dgemm('n','n',nbf,noca,noca, &
-               1.0_dp,mo_a,nbf, &
-                      scr1,noca, &
-               0.0_dp,scr2,nbf)
-    call dgemm('n','t',nbf,nbf,noca, &
-               1.0_dp,scr2,nbf, &
-                      mo_a,nbf, &
-               0.0_dp,scr1,nbf)
-    call pack_matrix(scr1,ta)
+   ! MO(I+,J+) -> AO(M,N)
+     call dgemm('n','n',nbf,noca,noca, &
+                1.0_dp,mo_a,nbf, &
+                       scr1,noca, &
+                0.0_dp,scr2,nbf)
+     call dgemm('n','t',nbf,nbf,noca, &
+                1.0_dp,scr2,nbf, &
+                       mo_a,nbf, &
+                0.0_dp,scr1,nbf)
+     call pack_matrix(scr1,ta)
 
-    call dgemm('t','n',nvirb,nvirb,noca, &
-               1.0_dp,bvec,noca, &
-                      bvec,noca, &
-               0.0_dp,scr1,nvirb)
+     call dgemm('t','n',nvirb,nvirb,noca, &
+                1.0_dp,bvec,noca, &
+                       bvec,noca, &
+                0.0_dp,scr1,nvirb)
 
-  ! MO(A-,B-) -> AO(M,N)
-    call dgemm('n','n',nbf,nvirb,nvirb, &
-               1.0_dp,mo_b(:,nocb+1:),nbf, &
-                      scr1,nvirb, &
-               0.0_dp,scr2,nbf)
-    call dgemm('n','t',nbf,nbf,nvirb, &
-               1.0_dp,scr2,nbf, &
-                      mo_b(:,nocb+1:),nbf, &
-               0.0_dp,scr1,nbf)
-    call pack_matrix(scr1,tb)
+   ! MO(A-,B-) -> AO(M,N)
+     call dgemm('n','n',nbf,nvirb,nvirb, &
+                1.0_dp,mo_b(:,nocb+1:),nbf, &
+                       scr1,nvirb, &
+                0.0_dp,scr2,nbf)
+     call dgemm('n','t',nbf,nbf,nvirb, &
+                1.0_dp,scr2,nbf, &
+                       mo_b(:,nocb+1:),nbf, &
+                0.0_dp,scr1,nbf)
+     call pack_matrix(scr1,tb)
 
-    deallocate(scr1,scr2)
+     deallocate(scr1,scr2)
   end subroutine umrsfdmat
 
+   subroutine umrsfromcal(xm,xminv,en_a, en_b,fa,fb,noca,nocb)
+     use precision, only: dp
 
+     implicit none
+
+     real(kind=dp), intent(out), dimension(:) :: xm
+     real(kind=dp), intent(out), dimension(:) :: xminv
+     real(kind=dp), intent(in), dimension(:) :: en_a, en_b
+     real(kind=dp), intent(in), dimension(:,:) :: fa
+     real(kind=dp), intent(in), dimension(:,:) :: fb
+     integer, intent(in) :: noca, nocb
+
+     integer :: ij, i, j, k, nbf, nsoc, lzdim, nvira
+
+     nbf = ubound(fa, 1)
+
+     nvira = nbf-noca
+     nsoc = noca-nocb
+     lzdim = nocb*(nsoc+nvira)+nsoc*nvira
+
+   ! doc-socc
+     ij = 0
+     do i = nocb+1, noca
+       do j = 1, nocb
+         ij = ij+1
+         xm(ij) = (en_b(i) - en_b(j))
+       end do
+     end do
+
+   ! DOC-VIRT
+     do k = noca+1, nbf
+       do j = 1, nocb
+         ij = ij+1
+         xm(ij) = en_b(k)-en_b(j)
+       end do
+     end do
+
+   ! SOCC-VIRT
+     do k = noca+1, nbf
+       do i = nocb+1, noca
+         ij = ij+1
+         xm(ij) = (en_a(k)-en_a(i))
+       end do
+     end do
+
+     do j = 1, lzdim
+       xminv(j)=1.0_dp/xm(j)
+     end do
+
+   end subroutine umrsfromcal
 
 end module tdhf_mrsf_lib
 
