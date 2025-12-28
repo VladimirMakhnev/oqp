@@ -532,7 +532,8 @@ contains
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, &
-      umrsfdmat, umrsfsp, umrsfromcal
+      umrsfdmat, umrsfsp, umrsfromcal, umrsfrolhs, &
+      umrsfrowcal
     use oqp_linalg
     use printing, only: print_module_info
 
@@ -1164,9 +1165,13 @@ contains
           call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
       endif
 
-
-      call sfrolhs(lhs, xk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
-                   nocca, noccb)
+      if (umrsf) then
+          call umrsfrolhs(lhs, xk, mo_energy_a, mo_energy_b, fa, fb, ab1_mo_a, ab1_mo_b, &
+                       nocca, noccb)
+      else
+          call sfrolhs(lhs, xk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
+                       nocca, noccb)
+      endif
 
       call pcgrbpini(errv, pk, error, rhs, xminv, lhs)
 
@@ -1340,10 +1345,15 @@ contains
     wmo = 0
     if (mrst==1 .or. mrst==3) then
 
-      call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &
-                      hxa, hxb, ppija, ppijb, &
-                      nocca, noccb)
-
+      if (umrsf) then
+        call umrsfrowcal(wmo, mo_energy_a, mo_energy_b, fa, fb, xk, &
+                        hxa, hxb, ppija, ppijb, &
+                        nocca, noccb)
+      else
+        call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &
+                        hxa, hxb, ppija, ppijb, &
+                        nocca, noccb)
+      endif
     else if (mrst==5) then
 
       call mrsfqrowcal(wmo, mo_energy_a, fa, fb, xk, &

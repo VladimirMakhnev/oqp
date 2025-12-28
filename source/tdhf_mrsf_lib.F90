@@ -3179,5 +3179,248 @@ end subroutine umrsfmntoia
 
    end subroutine umrsfromcal
 
+   subroutine umrsfrolhs(pmo, z, en_a, en_b, fa, fb, hpza, hpzb,  &
+                   noca, nocb)
+   use precision, only: dp
+
+   implicit none
+
+   real(kind=dp), intent(out), dimension(:)   :: pmo
+   real(kind=dp), intent(in),  dimension(:)   :: z
+   real(kind=dp), intent(in),  dimension(:)   :: en_a
+   real(kind=dp), intent(in),  dimension(:)   :: en_b
+   real(kind=dp), intent(in),  dimension(:,:) :: fa, fb
+   real(kind=dp), intent(in),  dimension(:,:) :: hpza, hpzb
+   integer,        intent(in)                 :: noca, nocb
+
+   integer :: nbf
+   integer :: lr1, lr2
+   integer :: i, j, k, ij
+   real(kind=dp), allocatable :: ztmp(:,:), wrk(:,:)
+
+   nbf = ubound(fa, 1)
+   lr1 = nocb + 1        ! первый socc
+   lr2 = noca           ! второй socc (для триплета их две)
+
+   allocate(ztmp(nbf,nbf), wrk(nbf,nbf))
+   ztmp = 0.0_dp
+   wrk  = 0.0_dp
+   pmo  = 0.0_dp
+
+   ij = 0
+
+   ! doc–socc
+   do i = nocb+1, noca
+      do j = 1, nocb
+         ij = ij + 1
+         ztmp(j,i) = z(ij)
+      end do
+   end do
+
+   ! doc–virt
+   do k = noca+1, nbf
+      do j = 1, nocb
+         ij = ij + 1
+         ztmp(j,k) = z(ij)
+      end do
+   end do
+
+   ! socc–virt
+   do k = noca+1, nbf
+      do i = nocb+1, noca
+         ij = ij + 1
+         ztmp(i,k) = z(ij)
+      end do
+   end do
+
+   wrk = 0.0_dp
+
+
+   wrk = 0.5_dp * wrk
+
+   ij = 0
+   do i = 1, 2    ! две socc: lr1, lr2
+      do j = 1, nocb
+         ij = ij + 1
+         pmo(ij) = ( en_b(nocb + i) - en_b(j) ) * z(ij) + wrk(j,i)
+      end do
+   end do
+
+   wrk = 0.0_dp
+
+
+   wrk = 0.5_dp * wrk
+
+   do k = 1, nbf-noca
+      do j = 1, nocb
+         ij = ij + 1
+         pmo(ij) = 0.5_dp * ( (en_a(noca + k) - en_a(j)) &
+                            + (en_b(noca + k) - en_b(j)) ) * z(ij)  &
+                   + wrk(j,k)
+      end do
+   end do
+
+   wrk = 0.0_dp
+
+
+   wrk = 0.5_dp * wrk
+
+   do k = 1, nbf-noca
+      do i = 1, noca-nocb    ! i = 1,2 → lr1, lr2
+         ij = ij + 1
+         pmo(ij) = ( en_a(noca + k) - en_a(nocb + i) ) * z(ij)  &
+                   + wrk(k,i)
+      end do
+   end do
+
+   deallocate(ztmp, wrk)
+
+end subroutine umrsfrolhs
+
+   subroutine umrsfrowcal(wmo, mo_energy_a, mo_energy_b, fa, fb, xk, &
+                         xhxa, xhxb, hppija, hppijb, noca, nocb)
+
+     use precision, only: dp
+
+     implicit none
+
+     real(kind=dp), intent(out), dimension(:,:) :: wmo
+     real(kind=dp), intent(in), dimension(:) :: mo_energy_a,mo_energy_b
+     real(kind=dp), intent(in), dimension(:,:) :: fa, fb
+     real(kind=dp), intent(in), dimension(:) :: xk
+     real(kind=dp), intent(in), dimension(:,:) :: xhxa, xhxb
+     real(kind=dp), intent(in), dimension(:,:) :: hppija, hppijb
+     integer, intent(in) :: noca, nocb
+
+     real(kind=dp), allocatable, dimension(:,:) :: wrk, scr
+     integer :: i, a, k, x, y, j, b, ij, nbf, lr1, lr2
+
+
+     nbf = ubound(fa, 1)
+     lr1 = nocb+1
+     lr2 = noca
+
+     allocate(wrk(nbf,nbf), &
+              scr(nbf,nbf), &
+              source=0.0_dp)
+
+   ! Unpack  xk
+     ij = 0
+     do i = lr1, lr2
+       do j = 1, nocb
+         ij = ij+1
+         scr(j,i) = xk(ij)
+       end do
+     end do
+
+     do i = noca+1, nbf
+       do j = 1, nocb
+         ij = ij+1
+         scr(j,i) = xk(ij)
+       end do
+     end do
+
+     do k = noca+1, nbf
+       do i = lr1, lr2
+         ij = ij+1
+         scr(i,k) = xk(ij)
+       end do
+     end do
+
+   ! W_ix
+     do x = 1, nocb
+       do k = 1, nocb
+         wrk(x,1:2) = wrk(x,1:2)-fa(k,x)*scr(k,lr1:lr2)
+       end do
+     end do
+     do x = 1, nocb
+       do k = 1, nbf-noca
+         wrk(x,1:2) = wrk(x,1:2)+scr(lr1:lr2,noca+k)*fa(noca+k,x)
+       end do
+     end do
+
+     wmo(1:nocb,lr1:lr2) = wrk(1:nocb,1:2)*0.5_dp &
+                         + xhxa(1:nocb,lr1:lr2) &
+                         + xhxb(1:nocb,lr1:lr2) &
+                         + hppija(1:nocb,lr1:lr2)
+     wmo(1:nocb,lr1) = wmo(1:nocb,lr1) &
+                     + mo_energy_b(1:nocb)*scr(1:nocb,lr1)
+     wmo(1:nocb,lr2) = wmo(1:nocb,lr2) &
+                     + mo_energy_b(1:nocb)*scr(1:nocb,lr2)
+
+ !   ----- W_IA -----
+     wrk = 0.0_dp
+     do i = 1, nocb
+       do a = 1, nbf-noca
+         wrk(i,a) = wrk(i,a)+fa(lr1,i)*scr(lr1,noca+a) &
+                            +fa(lr2,i)*scr(lr2,noca+a)
+       end do
+     end do
+
+     wmo(1:nocb,noca+1:nbf) = wrk(1:nocb,1:nbf-noca)*0.5_dp &
+                           + xhxb(1:nocb,noca+1:nbf)
+
+     do a = 1, nbf-noca
+       wmo(1:nocb,noca+a) = wmo(1:nocb,noca+a) &
+                          + 0.5_dp * ( mo_energy_a(1:nocb) + mo_energy_b(1:nocb) )*scr(1:nocb,noca+a)
+     end do
+
+ !   ----- W_XA -----
+     wrk = 0.0_dp
+     do a = 1, nbf-noca
+       do k = 1, nocb
+         wrk(1,a) = wrk(1,a)+fa(k,lr1)*scr(k,noca+a)
+         wrk(2,a) = wrk(2,a)+fa(k,lr2)*scr(k,noca+a)
+       end do
+     end do
+
+     do a = 1, nbf-noca
+       wrk(1,a) = wrk(1,a)-fb(lr1,lr1)*scr(lr1,noca+a) &
+                          -fb(lr2,lr1)*scr(lr2,noca+a)
+       wrk(2,a) = wrk(2,a)-fb(lr1,lr2)*scr(lr1,noca+a) &
+                          -fb(lr2,lr2)*scr(lr2,noca+a)
+     end do
+
+     wmo(lr1:lr2,noca+1:nbf) = wrk(1:2,1:nbf-noca)*0.5_dp &
+                            + xhxb(lr1:lr2,noca+1:nbf)
+     do a = noca+1, nbf
+       wmo(lr1:lr2,a) = wmo(lr1:lr2,a) &
+                      + mo_energy_a(lr1:lr2)*scr(lr1:lr2,a)
+     end do
+
+   !  W_ij
+     do i = 1, nocb
+       do j = 1, i
+         wmo(i,j) = hppija(i,j)+hppijb(i,j)+xhxa(j,i)
+       end do
+     end do
+
+   ! W_xy
+     do x = nocb+1, noca
+       do y = nocb+1, x
+         wmo(x,y) = xhxa(y,x)+xhxb(y,x)+hppija(x,y)
+       end do
+     end do
+
+   ! W_ab
+     do a = noca+1, nbf
+       do b = noca+1, a
+         wmo(a,b) = xhxb(b,a)
+       end do
+     end do
+
+   ! Scale diagonal elements
+     do i = 1, nbf
+       wmo(i,i) = wmo(i,i)*0.5_dp
+     end do
+
+     wmo = -wmo
+
+     return
+
+   end subroutine umrsfrowcal
+
+
+
 end module tdhf_mrsf_lib
 

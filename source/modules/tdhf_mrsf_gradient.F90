@@ -72,9 +72,13 @@ contains
 
     integer :: s_size
 
+    integer :: arr_size
+
     integer :: nbf, nbf2
     integer :: mrst
     logical :: roref = .false.
+    logical :: uref = .false.
+    logical :: umrsf
 
     type(dft_grid_t) :: molGrid
 
@@ -98,13 +102,26 @@ contains
 
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
+    if (scf_type==2) uref = .true.
+
+    umrsf = infos%tddft%umrsf
+
+    if (umrsf) then
+        arr_size = 11
+    else
+        arr_size = 7
+    endif
 
     dft = infos%control%hamilton == 20
 
   ! Files open
     open (unit=iw, file=infos%log_filename, position="append")
   !
+  if (umrsf) then
+    call print_module_info('UMRSF_Grad','Computing Gradient of UMRSF-TDDFT')
+  else
     call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT')
+  endif
 !
     write(iw,'(/5X,"Gradient options"/&
                 &5X,18("-")/&
@@ -129,14 +146,14 @@ contains
 
     call sf_1e_grad(infos, basis)
 
-    write(iw,"(' ..... End Of 1-Eelectron Gradient ......')")
+    write(iw,"(' ..... End Of 1-Electron Gradient ......')")
     call measure_time(print_total=1, log_unit=iw)
     call flush(iw)
 
     allocate(v(nbf,nbf,2), source=0.0d0)
     allocate(d(nbf,nbf,2), source=0.0d0)
     allocate(p(nbf,nbf,2), source=0.0d0)
-    allocate(spc(7,nbf,nbf), source=0.0d0)
+    allocate(spc(arr_size,nbf,nbf), source=0.0d0)
 
     call data_has_tags(infos%dat, tags_general, module_name, subroutine_name, WITH_ABORT)
     call tagarray_get_data(infos%dat, OQP_DM_A, dmat_a)
@@ -156,7 +173,7 @@ contains
 
     v(:,:,1) = td_abxc
     if (mrst==1 .or. mrst==3) then
-      spc(1:7,:,:) = td_mrsf_density
+      spc(1:arr_size,:,:) = td_mrsf_density
     end if
 
 !   Compute xc gradient
@@ -499,4 +516,207 @@ contains
 
 !###############################################################################
 
-end module tdhf_mrsf_gradient_mod
+!###############################################################################
+
+!> @brief This routine forms the product of density
+!>        matrices for use in forming the two electron
+!>        gradient. Valid for closed and open shell SCF.                      
+  subroutine grd2_umrsf_compute_data_t_get_density(this, basis, id, dab, dabmax)
+
+    implicit none
+
+    class(grd2_mrsf_compute_data_t), target, intent(inout) :: this
+    type(basis_set), intent(in) :: basis
+    integer, intent(in) :: id(4)
+    real(kind=dp), target, intent(out) :: dab(*)
+    real(kind=dp), intent(out) :: dabmax
+
+    real(kind=dp) :: xcfact, xcfact2, coulfact, df1, dq1, dt2
+    real(kind=dp) :: qfspcp1, qfspcp2, qfspcp3, sgnk
+    real(kind=dp) :: db1, db2, dc1, dc2, dc3, dc4, dd1, dd2, dd3, dd4
+    real(kind=dp), pointer, dimension(:,:) :: &
+      ball, bo2va, bo2vb, bo1va, bo1vb, &
+      bco1a, bco1b, bco2a, bco2b, co12, o21v
+    integer :: i, j, k, l
+    integer :: loc(4)
+    integer :: nbf(4)
+    real(kind=dp), pointer :: ab(:,:,:,:)
+    integer :: i1, j1, k1, l1
+
+    ! mrsf density-like
+    ball => this%spc2(11,:,:)
+    ! Spin-pair coupling density-like
+    bo2v => this%spc2(1,:,:)
+    bo2v => this%spc2(2,:,:)
+    bo1v => this%spc2(3,:,:)
+    bo1v => this%spc2(4,:,:)
+    bco1 => this%spc2(5,:,:)
+    bco1 => this%spc2(6,:,:)
+    bco2 => this%spc2(7,:,:)
+    bco2 => this%spc2(8,:,:)
+    o21v => this%spc2(9,:,:)
+    co12 => this%spc2(10,:,:)
+
+    coulfact = 4*this%coulscale
+    xcfact = this%hfscale
+    xcfact2 = this%hfscale2
+    qfspcp1 = this%spcscale(1)
+    qfspcp2 = this%spcscale(2)
+    qfspcp3 = this%spcscale(3)
+
+    sgnk = 1.0_dp
+    if (this%mrst==3) sgnk = -1.0_dp
+    dabmax = 0
+    loc = basis%ao_offset(id)-1
+
+    nbf = basis%naos(id)
+
+    ab(1:nbf(4),1:nbf(3),1:nbf(2),1:nbf(1)) => dab(1:product(nbf))
+
+    do i = 1, nbf(1)
+      i1 = loc(1) + i
+
+      do j = 1, nbf(2)
+        j1 = loc(2) + j
+
+        do k = 1, nbf(3)
+          k1 = loc(3) + k
+
+          do l = 1, nbf(4)
+            l1 = loc(4) + l
+            df1 = (this%d2(i1,j1,1)+this%p2(i1,j1,1))*this%d2(k1,l1,1) &
+                +  this%d2(i1,j1,1)                  *this%p2(k1,l1,1)
+            df1 = df1 * coulfact
+
+            if (xcfact /= 0.0_dp .or. xcfact2 /= 0.0_dp) then
+              dq1 = (this%d2(i1,k1,1)+this%p2(i1,k1,1))*this%d2(j1,l1,1) &
+                  +  this%d2(i1,k1,1)                  *this%p2(j1,l1,1) &
+                  + (this%d2(i1,l1,1)+this%p2(i1,l1,1))*this%d2(j1,k1,1) &
+                  +  this%d2(i1,l1,1)                  *this%p2(j1,k1,1) &
+                  + (this%d2(i1,k1,2)+this%p2(i1,k1,2))*this%d2(j1,l1,2) &
+                  +  this%d2(i1,k1,2)                  *this%p2(j1,l1,2) &
+                  + (this%d2(i1,l1,2)+this%p2(i1,l1,2))*this%d2(j1,k1,2) &
+                  +  this%d2(i1,l1,2)                  *this%p2(j1,k1,2)
+              dt2 = ball(i1,k1)*ball(j1,l1) &
+                  + ball(k1,i1)*ball(l1,j1) &
+                  + ball(i1,l1)*ball(j1,k1) &
+                  + ball(l1,i1)*ball(k1,j1)
+
+              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*dt2
+            end if
+
+            if (qfspcp1 /= 0.0_dp) then
+              db1 =  co12(i1,k1)*co12(l1,j1) &
+                   + co12(i1,l1)*co12(k1,j1) &
+                   + co12(j1,k1)*co12(l1,i1) &
+                   + co12(j1,l1)*co12(k1,i1) &
+                   + co12(l1,j1)*co12(i1,k1) &
+                   + co12(k1,j1)*co12(i1,l1) &
+                   + co12(l1,i1)*co12(j1,k1) &
+                   + co12(k1,i1)*co12(j1,l1)
+
+              df1 = df1 + sgnk*qfspcp1*db1
+            end if
+
+            if (qfspcp2 /= 0.0_dp) then
+              db2 =  o21v(i1,k1)*o21v(l1,j1) &
+                   + o21v(i1,l1)*o21v(k1,j1) &
+                   + o21v(j1,k1)*o21v(l1,i1) &
+                   + o21v(j1,l1)*o21v(k1,i1) &
+                   + o21v(l1,j1)*o21v(i1,k1) &
+                   + o21v(k1,j1)*o21v(i1,l1) &
+                   + o21v(l1,i1)*o21v(j1,k1) &
+                   + o21v(k1,i1)*o21v(j1,l1)
+
+              df1 = df1 - sgnk*qfspcp2*db2
+            end if
+
+            if (qfspcp3 /= 0.0_dp) then
+              dc1 =  bco1(i1,k1)*bo2v(j1,l1) &
+                   + bco1(i1,l1)*bo2v(j1,k1) &
+                   + bco1(j1,k1)*bo2v(i1,l1) &
+                   + bco1(j1,l1)*bo2v(i1,k1) &
+                   + bco1(l1,j1)*bo2v(k1,i1) &
+                   + bco1(k1,j1)*bo2v(l1,i1) &
+                   + bco1(l1,i1)*bo2v(k1,j1) &
+                   + bco1(k1,i1)*bo2v(l1,j1)
+
+              dc2 =  bco2(i1,k1)*bo1v(j1,l1) &
+                   + bco2(i1,l1)*bo1v(j1,k1) &
+                   + bco2(j1,k1)*bo1v(i1,l1) &
+                   + bco2(j1,l1)*bo1v(i1,k1) &
+                   + bco2(l1,j1)*bo1v(k1,i1) &
+                   + bco2(k1,j1)*bo1v(l1,i1) &
+                   + bco2(l1,i1)*bo1v(k1,j1) &
+                   + bco2(k1,i1)*bo1v(l1,j1)
+
+              dc3 =  bo2v(i1,k1)*bco1(j1,l1) &
+                   + bo2v(i1,l1)*bco1(j1,k1) &
+                   + bo2v(j1,k1)*bco1(i1,l1) &
+                   + bo2v(j1,l1)*bco1(i1,k1) &
+                   + bo2v(l1,j1)*bco1(k1,i1) &
+                   + bo2v(k1,j1)*bco1(l1,i1) &
+                   + bo2v(l1,i1)*bco1(k1,j1) &
+                   + bo2v(k1,i1)*bco1(l1,j1)
+
+              dc4 =  bo1v(i1,k1)*bco2(j1,l1) &
+                   + bo1v(i1,l1)*bco2(j1,k1) &
+                   + bo1v(j1,k1)*bco2(i1,l1) &
+                   + bo1v(j1,l1)*bco2(i1,k1) &
+                   + bo1v(l1,j1)*bco2(k1,i1) &
+                   + bo1v(k1,j1)*bco2(l1,i1) &
+                   + bo1v(l1,i1)*bco2(k1,j1) &
+                   + bo1v(k1,i1)*bco2(l1,j1)
+
+              dd1 =  bco1(i1,j1)*bo2v(l1,k1) &
+                   + bco1(i1,j1)*bo2v(k1,l1) &
+                   + bco1(j1,i1)*bo2v(l1,k1) &
+                   + bco1(j1,i1)*bo2v(k1,l1) &
+                   + bco1(l1,k1)*bo2v(i1,j1) &
+                   + bco1(k1,l1)*bo2v(i1,j1) &
+                   + bco1(l1,k1)*bo2v(j1,i1) &
+                   + bco1(k1,l1)*bo2v(j1,i1)
+
+              dd2 =  bco2(i1,j1)*bo1v(l1,k1) &
+                   + bco2(i1,j1)*bo1v(k1,l1) &
+                   + bco2(j1,i1)*bo1v(l1,k1) &
+                   + bco2(j1,i1)*bo1v(k1,l1) &
+                   + bco2(l1,k1)*bo1v(i1,j1) &
+                   + bco2(k1,l1)*bo1v(i1,j1) &
+                   + bco2(l1,k1)*bo1v(j1,i1) &
+                   + bco2(k1,l1)*bo1v(j1,i1)
+
+              dd3 =  bo2v(i1,j1)*bco1(l1,k1) &
+                   + bo2v(i1,j1)*bco1(k1,l1) &
+                   + bo2v(j1,i1)*bco1(l1,k1) &
+                   + bo2v(j1,i1)*bco1(k1,l1) &
+                   + bo2v(l1,k1)*bco1(i1,j1) &
+                   + bo2v(k1,l1)*bco1(i1,j1) &
+                   + bo2v(l1,k1)*bco1(j1,i1) &
+                   + bo2v(k1,l1)*bco1(j1,i1)
+
+              dd4 =  bo1v(i1,j1)*bco2(l1,k1) &
+                   + bo1v(i1,j1)*bco2(k1,l1) &
+                   + bo1v(j1,i1)*bco2(l1,k1) &
+                   + bo1v(j1,i1)*bco2(k1,l1) &
+                   + bo1v(l1,k1)*bco2(i1,j1) &
+                   + bo1v(k1,l1)*bco2(i1,j1) &
+                   + bo1v(l1,k1)*bco2(j1,i1) &
+                   + bo1v(k1,l1)*bco2(j1,i1)
+
+              df1  = df1 + sgnk*qfspcp3*(-dc1-dc2-dc3-dc4 &
+                                         +dd1+dd2+dd3+dd4)
+            end if
+
+            dabmax = max(dabmax, abs(df1))
+            ab(l,k,j,i) = df1*product(basis%bfnrm([i1,j1,k1,l1]))
+          end do
+        end do
+      end do
+    end do
+  end subroutine grd2_umrsf_compute_data_t_get_density
+
+!###############################################################################
+
+
+  end module tdhf_mrsf_gradient_mod
