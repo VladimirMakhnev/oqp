@@ -24,6 +24,20 @@ module tdhf_mrsf_gradient_mod
     procedure :: get_density => grd2_mrsf_compute_data_t_get_density
   end type
 
+  type, extends (grd2_compute_data_t) :: grd2_umrsf_compute_data_t
+    real(kind=dp), pointer :: d2(:,:,:) => null()
+    real(kind=dp), pointer :: p2(:,:,:) => null()
+    real(kind=dp), pointer :: spc2(:,:,:) => null()
+    integer :: nbf = 0
+    integer :: mrst = 1
+    real(kind=dp), dimension(3) :: spcscale = [0.0_dp, 0.0_dp, 0.0_dp]
+  contains 
+    procedure :: init => grd2_umrsf_compute_data_t_init
+    procedure :: clean => grd2_umrsf_compute_data_t_clean
+    procedure :: get_density => grd2_umrsf_compute_data_t_get_density
+  end type
+
+
 contains
 
   subroutine tdhf_mrsf_gradient_C(c_handle) bind(C, name="tdhf_mrsf_gradient")
@@ -229,7 +243,7 @@ contains
     type(basis_set) :: basis
     real(kind=dp), contiguous, target :: p(:,:,:), d(:,:,:), spc(:,:,:), v(:,:)
 
-    logical :: urohf, dft
+    logical :: urohf, dft, umrsf
     real(kind=dp) :: scale_exch  !> HF scale in Reference
     real(kind=dp) :: scale_exch2 !> HF scale in Response
 
@@ -239,6 +253,7 @@ contains
 
     dft = infos%control%hamilton == 20 ! dft or hf
     urohf = infos%control%scftype >= 2
+    umrsf = infos%tddft%umrsf
 
     scale_exch = 1.0_dp
     scale_exch2 = 1.0_dp
@@ -270,18 +285,29 @@ contains
     write(*, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
     write(*, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
        infos%tddft%spc_coco, infos%tddft%spc_ovov, infos%tddft%spc_coov
-
-    gcomp = grd2_mrsf_compute_data_t( d2 = d &
-                                    , p2 = p &
-                                    , spc2 = spc &
-                                    , nbf = basis%nbf &
-                                    , hfscale = scale_exch &
-                                    , hfscale2 = scale_exch2 &
-                                    , spcscale = [infos%tddft%spc_coco, &
-                                                  infos%tddft%spc_ovov, &
-                                                  infos%tddft%spc_coov] &
-                                    , mrst = infos%tddft%mult )
-
+    if (umrsf) then
+     gcomp = grd2_umrsf_compute_data_t( d2 = d &
+                                      , p2 = p &
+                                      , spc2 = spc &
+                                      , nbf = basis%nbf &
+                                      , hfscale = scale_exch &
+                                      , hfscale2 = scale_exch2 &
+                                      , spcscale = [infos%tddft%spc_coco, &
+                                                    infos%tddft%spc_ovov, &
+                                                    infos%tddft%spc_coov] &
+                                      , mrst = infos%tddft%mult )
+    else
+     gcomp = grd2_mrsf_compute_data_t( d2 = d &
+                                     , p2 = p &
+                                     , spc2 = spc &
+                                     , nbf = basis%nbf &
+                                     , hfscale = scale_exch &
+                                     , hfscale2 = scale_exch2 &
+                                     , spcscale = [infos%tddft%spc_coco, &
+                                                   infos%tddft%spc_ovov, &
+                                                   infos%tddft%spc_coov] &
+                                     , mrst = infos%tddft%mult )
+    endif
     call gcomp%init()
 
     call grd2_driver(infos, basis, de, gcomp, &
@@ -518,6 +544,31 @@ contains
 
 !###############################################################################
 
+  subroutine grd2_umrsf_compute_data_t_init(this)
+    implicit none
+    class(grd2_umrsf_compute_data_t), target, intent(inout) :: this
+
+    call this%clean()
+
+    this%d2(:,:,1) = this%d2(:,:,1) +   this%d2(:,:,2)
+    this%d2(:,:,2) = this%d2(:,:,1) - 2*this%d2(:,:,2)
+
+    this%p2(:,:,1) = this%p2(:,:,1) +   this%p2(:,:,2)
+    this%p2(:,:,2) = this%p2(:,:,1) - 2*this%p2(:,:,2)
+
+  end subroutine
+
+!###############################################################################
+
+  subroutine grd2_umrsf_compute_data_t_clean(this)
+    implicit none
+    class(grd2_umrsf_compute_data_t), target, intent(inout) :: this
+  end subroutine
+
+!###############################################################################
+
+!###############################################################################
+
 !> @brief This routine forms the product of density
 !>        matrices for use in forming the two electron
 !>        gradient. Valid for closed and open shell SCF.                      
@@ -525,7 +576,7 @@ contains
 
     implicit none
 
-    class(grd2_mrsf_compute_data_t), target, intent(inout) :: this
+    class(grd2_umrsf_compute_data_t), target, intent(inout) :: this
     type(basis_set), intent(in) :: basis
     integer, intent(in) :: id(4)
     real(kind=dp), target, intent(out) :: dab(*)
@@ -546,14 +597,14 @@ contains
     ! mrsf density-like
     ball => this%spc2(11,:,:)
     ! Spin-pair coupling density-like
-    bo2v => this%spc2(1,:,:)
-    bo2v => this%spc2(2,:,:)
-    bo1v => this%spc2(3,:,:)
-    bo1v => this%spc2(4,:,:)
-    bco1 => this%spc2(5,:,:)
-    bco1 => this%spc2(6,:,:)
-    bco2 => this%spc2(7,:,:)
-    bco2 => this%spc2(8,:,:)
+    bo2va => this%spc2(1,:,:)
+    bo2vb => this%spc2(2,:,:)
+    bo1va => this%spc2(3,:,:)
+    bo1vb => this%spc2(4,:,:)
+    bco1a => this%spc2(5,:,:)
+    bco1b => this%spc2(6,:,:)
+    bco2a => this%spc2(7,:,:)
+    bco2b => this%spc2(8,:,:)
     o21v => this%spc2(9,:,:)
     co12 => this%spc2(10,:,:)
 
@@ -632,77 +683,77 @@ contains
             end if
 
             if (qfspcp3 /= 0.0_dp) then
-              dc1 =  bco1(i1,k1)*bo2v(j1,l1) &
-                   + bco1(i1,l1)*bo2v(j1,k1) &
-                   + bco1(j1,k1)*bo2v(i1,l1) &
-                   + bco1(j1,l1)*bo2v(i1,k1) &
-                   + bco1(l1,j1)*bo2v(k1,i1) &
-                   + bco1(k1,j1)*bo2v(l1,i1) &
-                   + bco1(l1,i1)*bo2v(k1,j1) &
-                   + bco1(k1,i1)*bo2v(l1,j1)
+              dc1 =  bco1a(i1,k1)*bo2va(j1,l1) &
+                   + bco1a(i1,l1)*bo2va(j1,k1) &
+                   + bco1a(j1,k1)*bo2va(i1,l1) &
+                   + bco1a(j1,l1)*bo2va(i1,k1) &
+                   + bco1a(l1,j1)*bo2va(k1,i1) &
+                   + bco1a(k1,j1)*bo2va(l1,i1) &
+                   + bco1a(l1,i1)*bo2va(k1,j1) &
+                   + bco1a(k1,i1)*bo2va(l1,j1)
 
-              dc2 =  bco2(i1,k1)*bo1v(j1,l1) &
-                   + bco2(i1,l1)*bo1v(j1,k1) &
-                   + bco2(j1,k1)*bo1v(i1,l1) &
-                   + bco2(j1,l1)*bo1v(i1,k1) &
-                   + bco2(l1,j1)*bo1v(k1,i1) &
-                   + bco2(k1,j1)*bo1v(l1,i1) &
-                   + bco2(l1,i1)*bo1v(k1,j1) &
-                   + bco2(k1,i1)*bo1v(l1,j1)
+              dc2 =  bco2a(i1,k1)*bo1va(j1,l1) &
+                   + bco2a(i1,l1)*bo1va(j1,k1) &
+                   + bco2a(j1,k1)*bo1va(i1,l1) &
+                   + bco2a(j1,l1)*bo1va(i1,k1) &
+                   + bco2a(l1,j1)*bo1va(k1,i1) &
+                   + bco2a(k1,j1)*bo1va(l1,i1) &
+                   + bco2a(l1,i1)*bo1va(k1,j1) &
+                   + bco2a(k1,i1)*bo1va(l1,j1)
 
-              dc3 =  bo2v(i1,k1)*bco1(j1,l1) &
-                   + bo2v(i1,l1)*bco1(j1,k1) &
-                   + bo2v(j1,k1)*bco1(i1,l1) &
-                   + bo2v(j1,l1)*bco1(i1,k1) &
-                   + bo2v(l1,j1)*bco1(k1,i1) &
-                   + bo2v(k1,j1)*bco1(l1,i1) &
-                   + bo2v(l1,i1)*bco1(k1,j1) &
-                   + bo2v(k1,i1)*bco1(l1,j1)
+              dc3 =  bo2vb(i1,k1)*bco1b(j1,l1) &
+                   + bo2vb(i1,l1)*bco1b(j1,k1) &
+                   + bo2vb(j1,k1)*bco1b(i1,l1) &
+                   + bo2vb(j1,l1)*bco1b(i1,k1) &
+                   + bo2vb(l1,j1)*bco1b(k1,i1) &
+                   + bo2vb(k1,j1)*bco1b(l1,i1) &
+                   + bo2vb(l1,i1)*bco1b(k1,j1) &
+                   + bo2vb(k1,i1)*bco1b(l1,j1)
 
-              dc4 =  bo1v(i1,k1)*bco2(j1,l1) &
-                   + bo1v(i1,l1)*bco2(j1,k1) &
-                   + bo1v(j1,k1)*bco2(i1,l1) &
-                   + bo1v(j1,l1)*bco2(i1,k1) &
-                   + bo1v(l1,j1)*bco2(k1,i1) &
-                   + bo1v(k1,j1)*bco2(l1,i1) &
-                   + bo1v(l1,i1)*bco2(k1,j1) &
-                   + bo1v(k1,i1)*bco2(l1,j1)
+              dc4 =  bo1vb(i1,k1)*bco2b(j1,l1) &
+                   + bo1vb(i1,l1)*bco2b(j1,k1) &
+                   + bo1vb(j1,k1)*bco2b(i1,l1) &
+                   + bo1vb(j1,l1)*bco2b(i1,k1) &
+                   + bo1vb(l1,j1)*bco2b(k1,i1) &
+                   + bo1vb(k1,j1)*bco2b(l1,i1) &
+                   + bo1vb(l1,i1)*bco2b(k1,j1) &
+                   + bo1vb(k1,i1)*bco2b(l1,j1)
 
-              dd1 =  bco1(i1,j1)*bo2v(l1,k1) &
-                   + bco1(i1,j1)*bo2v(k1,l1) &
-                   + bco1(j1,i1)*bo2v(l1,k1) &
-                   + bco1(j1,i1)*bo2v(k1,l1) &
-                   + bco1(l1,k1)*bo2v(i1,j1) &
-                   + bco1(k1,l1)*bo2v(i1,j1) &
-                   + bco1(l1,k1)*bo2v(j1,i1) &
-                   + bco1(k1,l1)*bo2v(j1,i1)
+              dd1 =  bco1a(i1,j1)*bo2va(l1,k1) &
+                   + bco1a(i1,j1)*bo2va(k1,l1) &
+                   + bco1a(j1,i1)*bo2va(l1,k1) &
+                   + bco1a(j1,i1)*bo2va(k1,l1) &
+                   + bco1a(l1,k1)*bo2va(i1,j1) &
+                   + bco1a(k1,l1)*bo2va(i1,j1) &
+                   + bco1a(l1,k1)*bo2va(j1,i1) &
+                   + bco1a(k1,l1)*bo2va(j1,i1)
 
-              dd2 =  bco2(i1,j1)*bo1v(l1,k1) &
-                   + bco2(i1,j1)*bo1v(k1,l1) &
-                   + bco2(j1,i1)*bo1v(l1,k1) &
-                   + bco2(j1,i1)*bo1v(k1,l1) &
-                   + bco2(l1,k1)*bo1v(i1,j1) &
-                   + bco2(k1,l1)*bo1v(i1,j1) &
-                   + bco2(l1,k1)*bo1v(j1,i1) &
-                   + bco2(k1,l1)*bo1v(j1,i1)
+              dd2 =  bco2a(i1,j1)*bo1va(l1,k1) &
+                   + bco2a(i1,j1)*bo1va(k1,l1) &
+                   + bco2a(j1,i1)*bo1va(l1,k1) &
+                   + bco2a(j1,i1)*bo1va(k1,l1) &
+                   + bco2a(l1,k1)*bo1va(i1,j1) &
+                   + bco2a(k1,l1)*bo1va(i1,j1) &
+                   + bco2a(l1,k1)*bo1va(j1,i1) &
+                   + bco2a(k1,l1)*bo1va(j1,i1)
 
-              dd3 =  bo2v(i1,j1)*bco1(l1,k1) &
-                   + bo2v(i1,j1)*bco1(k1,l1) &
-                   + bo2v(j1,i1)*bco1(l1,k1) &
-                   + bo2v(j1,i1)*bco1(k1,l1) &
-                   + bo2v(l1,k1)*bco1(i1,j1) &
-                   + bo2v(k1,l1)*bco1(i1,j1) &
-                   + bo2v(l1,k1)*bco1(j1,i1) &
-                   + bo2v(k1,l1)*bco1(j1,i1)
+              dd3 =  bo2vb(i1,j1)*bco1b(l1,k1) &
+                   + bo2vb(i1,j1)*bco1b(k1,l1) &
+                   + bo2vb(j1,i1)*bco1b(l1,k1) &
+                   + bo2vb(j1,i1)*bco1b(k1,l1) &
+                   + bo2vb(l1,k1)*bco1b(i1,j1) &
+                   + bo2vb(k1,l1)*bco1b(i1,j1) &
+                   + bo2vb(l1,k1)*bco1b(j1,i1) &
+                   + bo2vb(k1,l1)*bco1b(j1,i1)
 
-              dd4 =  bo1v(i1,j1)*bco2(l1,k1) &
-                   + bo1v(i1,j1)*bco2(k1,l1) &
-                   + bo1v(j1,i1)*bco2(l1,k1) &
-                   + bo1v(j1,i1)*bco2(k1,l1) &
-                   + bo1v(l1,k1)*bco2(i1,j1) &
-                   + bo1v(k1,l1)*bco2(i1,j1) &
-                   + bo1v(l1,k1)*bco2(j1,i1) &
-                   + bo1v(k1,l1)*bco2(j1,i1)
+              dd4 =  bo1vb(i1,j1)*bco2b(l1,k1) &
+                   + bo1vb(i1,j1)*bco2b(k1,l1) &
+                   + bo1vb(j1,i1)*bco2b(l1,k1) &
+                   + bo1vb(j1,i1)*bco2b(k1,l1) &
+                   + bo1vb(l1,k1)*bco2b(i1,j1) &
+                   + bo1vb(k1,l1)*bco2b(i1,j1) &
+                   + bo1vb(l1,k1)*bco2b(j1,i1) &
+                   + bo1vb(k1,l1)*bco2b(j1,i1)
 
               df1  = df1 + sgnk*qfspcp3*(-dc1-dc2-dc3-dc4 &
                                          +dd1+dd2+dd3+dd4)
@@ -715,7 +766,7 @@ contains
       end do
     end do
   end subroutine grd2_umrsf_compute_data_t_get_density
-
+!
 !###############################################################################
 
 
