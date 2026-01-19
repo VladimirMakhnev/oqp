@@ -1982,7 +1982,7 @@ end subroutine umrsfmntoia
                0.0_dp, scr2, nbf)
     call dgemm('n', 'n', nbf, nbf, nbf, &
                2.0_dp, scr2, nbf, &
-                       cb, nbf, &
+                       ca, nbf, &
                0.0_dp, scr, nbf)
 
     do j = noca+1, nbf
@@ -1995,7 +1995,7 @@ end subroutine umrsfmntoia
                0.0_dp, scr2, nbf)
     call dgemm('n', 'n', nbf, nbf, nbf, &
                2.0_dp, scr2, nbf, &
-                       cb, nbf, &
+                       ca, nbf, &
                0.0_dp, scr, nbf)
 
     do j = noca+1, nbf
@@ -2008,7 +2008,7 @@ end subroutine umrsfmntoia
                0.0_dp, scr2, nbf)
     call dgemm('n', 'n', nbf, 1, nbf, &
                2.0_dp, scr2, nbf, &
-                       cb(:,lr1), nbf, &
+                       ca(:,lr1), nbf, &
                0.0_dp, scr, nbf)
 
     do i = 1, nocb
@@ -2022,7 +2022,7 @@ end subroutine umrsfmntoia
                0.0_dp, scr2, nbf)
     call dgemm('n', 'n', nbf, 1, nbf, &
                2.0_dp, scr2, nbf, &
-                       cb(:,lr2), nbf, &
+                       ca(:,lr2), nbf, &
                0.0_dp, scr, nbf)
 
     do i = 1, nocb
@@ -2085,7 +2085,7 @@ end subroutine umrsfmntoia
     end do
 
     call dgemm('t', 'n', nbf, nbf, nbf, &
-               1.0_dp, ca, nbf, &
+               1.0_dp, cb, nbf, &
                        ado2vb, nbf, &
                0.0_dp, scr2, nbf)
     call dgemm('n' ,'n', nbf, nbf, nbf, &
@@ -2098,7 +2098,7 @@ end subroutine umrsfmntoia
     end do
 
     call dgemm('t', 'n', nbf, nbf, nbf, &
-               1.0_dp, ca, nbf, &
+               1.0_dp, cb, nbf, &
                        ado1vb, nbf, &
                0.0_dp, scr2, nbf)
     call dgemm('n', 'n', nbf, nbf, nbf, &
@@ -2112,7 +2112,7 @@ end subroutine umrsfmntoia
 
   ! O1V
     call dgemm('t', 'n', 1, nbf, nbf, &
-               1.0_dp, ca(:, lr1), nbf, &
+               1.0_dp, cb(:, lr1), nbf, &
                        adco2b, nbf,  &
                0.0_dp, scr2, 1)
     call dgemm('n', 'n', 1, nbf, nbf, &
@@ -2125,7 +2125,7 @@ end subroutine umrsfmntoia
     end do
 
     call dgemm('t', 'n', 1, nbf, nbf, &
-               1.0_dp, ca(:, lr2), nbf, &
+               1.0_dp, cb(:, lr2), nbf, &
                        adco1b, nbf,  &
                0.0_dp, scr2, 1)
     call dgemm('n',  'n', 1, nbf, nbf, &
@@ -3153,7 +3153,8 @@ end subroutine umrsfmntoia
      do i = nocb+1, noca
        do j = 1, nocb
          ij = ij+1
-         xm(ij) = (en_b(i) - en_b(j))
+!         xm(ij) = (en_a(i) - en_b(j))
+         xm(ij) = (fb(i,i)-fb(j,j))*0.5d0
        end do
      end do
 
@@ -3161,7 +3162,9 @@ end subroutine umrsfmntoia
      do k = noca+1, nbf
        do j = 1, nocb
          ij = ij+1
-         xm(ij) = en_b(k)-en_b(j)
+!         xm(ij) = (fa(k,k) - fb(j,j))*0.5d0 !en_a(k)-en_b(j)
+!         xm(ij) = en_a(k)-en_b(j)
+         xm(ij) = en_b(k)-en_a(j)
        end do
      end do
 
@@ -3169,7 +3172,8 @@ end subroutine umrsfmntoia
      do k = noca+1, nbf
        do i = nocb+1, noca
          ij = ij+1
-         xm(ij) = (en_a(k)-en_a(i))
+!         xm(ij) = (en_a(k)-en_b(i))
+         xm(ij) = (fa(k,k)-fa(i,i))*0.5d0
        end do
      end do
 
@@ -3179,103 +3183,147 @@ end subroutine umrsfmntoia
 
    end subroutine umrsfromcal
 
-   subroutine umrsfrolhs(pmo, z, en_a, en_b, fa, fb, hpza, hpzb,  &
-                   noca, nocb)
-   use precision, only: dp
+   subroutine umrsfrolhs(pmo, z, ea, eb, fa, fb, hpza, hpzb,  &
+                      noca, nocb)
+     use precision, only: dp
 
-   implicit none
+     implicit none
 
-   real(kind=dp), intent(out), dimension(:)   :: pmo
-   real(kind=dp), intent(in),  dimension(:)   :: z
-   real(kind=dp), intent(in),  dimension(:)   :: en_a
-   real(kind=dp), intent(in),  dimension(:)   :: en_b
-   real(kind=dp), intent(in),  dimension(:,:) :: fa, fb
-   real(kind=dp), intent(in),  dimension(:,:) :: hpza, hpzb
-   integer,        intent(in)                 :: noca, nocb
+     real(kind=dp), intent(out), dimension(:) :: pmo
+     real(kind=dp), intent(in), dimension(:) :: z
+     real(kind=dp), intent(in), dimension(:) :: ea,eb
+     real(kind=dp), intent(in), dimension(:,:) :: fa, fb
+     real(kind=dp), intent(in), dimension(:,:) :: hpza
+     real(kind=dp), intent(in), dimension(:,:) :: hpzb
+     integer, intent(in) :: noca, nocb
 
-   integer :: nbf
-   integer :: lr1, lr2
-   integer :: i, j, k, ij
-   real(kind=dp), allocatable :: ztmp(:,:), wrk(:,:)
+     real(kind=dp), allocatable, dimension(:,:) :: ztmp
+     real(kind=dp), allocatable, dimension(:,:) :: wrk
+     integer :: ij, i, k, j, nbf, lr1, lr2
 
-   nbf = ubound(fa, 1)
-   lr1 = nocb + 1        ! первый socc
-   lr2 = noca           ! второй socc (для триплета их две)
+     nbf = ubound(fa, 1)
+     lr1 = nocb+1
+     lr2 = noca
+     allocate(ztmp(nbf,nbf), &
+              wrk(nbf,nbf), &
+              source=0.0_dp)
 
-   allocate(ztmp(nbf,nbf), wrk(nbf,nbf))
-   ztmp = 0.0_dp
-   wrk  = 0.0_dp
-   pmo  = 0.0_dp
-
-   ij = 0
-
-   ! doc–socc
-   do i = nocb+1, noca
-      do j = 1, nocb
-         ij = ij + 1
+     ij = 0
+     do i = nocb+1, noca
+       do j = 1, nocb
+         ij = ij+1
          ztmp(j,i) = z(ij)
-      end do
-   end do
+       end do
+     end do
 
-   ! doc–virt
-   do k = noca+1, nbf
-      do j = 1, nocb
-         ij = ij + 1
+     do k = noca+1, nbf
+       do j = 1, nocb
+         ij = ij+1
          ztmp(j,k) = z(ij)
-      end do
-   end do
+       end do
+     end do
 
-   ! socc–virt
-   do k = noca+1, nbf
-      do i = nocb+1, noca
-         ij = ij + 1
+     do k = noca+1, nbf
+       do i = nocb+1, noca
+         ij = ij+1
          ztmp(i,k) = z(ij)
-      end do
-   end do
+       end do
+     end do
+	 
+   ! doc-socc
+     do j = 1, nocb
+       wrk(j,1) = wrk(j,1)+hpzb(j,1) &
+                          -fa(lr1,lr1)*ztmp(j,lr1) &
+                          -fa(lr2,lr1)*ztmp(j,lr2)
+       wrk(j,2) = wrk(j,2)+hpzb(j,2) &
+                          -fa(lr2,lr2)*ztmp(j,lr2) &
+                          -fa(lr1,lr2)*ztmp(j,lr1)
+     end do
 
-   wrk = 0.0_dp
+     do j = 1, nocb
+       do k = 1, nocb
+         wrk(j,1) = wrk(j,1)+fa(k,j)*ztmp(k,lr1)
+         wrk(j,2) = wrk(j,2)+fa(k,j)*ztmp(k,lr2)
+       end do
+     end do
+
+     do j = 1, nocb
+       do k = 1, nbf-noca
+         wrk(j,1) = wrk(j,1)+fb(noca+k,lr1)*ztmp(j,noca+k) &
+                            +fb(noca+k,j)*ztmp(lr1,noca+k)
+         wrk(j,2) = wrk(j,2)+fb(noca+k,j)*ztmp(lr2,noca+k) &
+                            +fb(noca+k,lr2)*ztmp(j,noca+k)
+       end do
+     end do
+
+     ij = 0
+     wrk = wrk*0.5_dp
+     do i = 1, 2
+       do j = 1, nocb
+         ij = ij+1
+         pmo(ij) = (eb(nocb+i)-eb(j))*z(ij)+wrk(j,i)
+       end do
+     end do
+
+   ! doc-virt
+     wrk = 0.0_dp
+     do k = 1, nbf-noca
+       do j = 1, nocb
+         wrk(j,k) = wrk(j,k)+hpza(j,k) &
+                            +hpzb(j,noca-nocb+k) &
+                            +fb(lr1,noca+k)*ztmp(j,lr1) &
+                            +fb(lr2,noca+k)*ztmp(j,lr2) &
+                            -fa(lr1,j)*ztmp(lr1,noca+k) &
+                            -fa(lr2,j)*ztmp(lr2,noca+k)
+       end do
+     end do
 
 
-   wrk = 0.5_dp * wrk
+     wrk = wrk*0.5_dp
+     do k = 1, nbf-noca
+       do j = 1, nocb
+         ij = ij+1
+         pmo(ij) =(eb(noca+k)-ea(j))*z(ij)+wrk(j,k)
+       end do
+     end do
 
-   ij = 0
-   do i = 1, 2    ! две socc: lr1, lr2
-      do j = 1, nocb
-         ij = ij + 1
-         pmo(ij) = ( en_b(nocb + i) - en_b(j) ) * z(ij) + wrk(j,i)
-      end do
-   end do
+   ! socc-virt
+     wrk = 0.0_dp
+     do k = 1, nbf-noca
+       wrk(k,1) = wrk(k,1)+hpza(lr1,k) &
+                          +fb(lr1,lr1)*ztmp(lr1,noca+k) &
+                          +fb(lr2,lr1)*ztmp(lr2,noca+k)
+       wrk(k,2) = wrk(k,2)+hpza(lr2,k) &
+                          +fb(lr1,lr2)*ztmp(lr1,noca+k) &
+                          +fb(lr2,lr2)*ztmp(lr2,noca+k)
+     end do
 
-   wrk = 0.0_dp
+     do k = 1, nbf-noca
+       do j = 1, nocb
+         wrk(k,1) = wrk(k,1)-fa(j,noca+k)*ztmp(j,lr1) &
+                            -fa(j,lr1)*ztmp(j,noca+k)
+         wrk(k,2) = wrk(k,2)-fa(j,noca+k)*ztmp(j,lr2) &
+                            -fa(j,lr2)*ztmp(j,noca+k)
+       end do
+     end do
 
+     do k = 1, nbf-noca
+       do j = 1, nbf-noca
+         wrk(k,1) = wrk(k,1)-fb(noca+j,noca+k)*ztmp(lr1,noca+j)
+         wrk(k,2) = wrk(k,2)-fb(noca+j,noca+k)*ztmp(lr2,noca+j)
+       end do
+     end do
 
-   wrk = 0.5_dp * wrk
+     wrk = wrk*0.5_dp
+     do k = 1, nbf-noca
+       do i = 1, noca-nocb
+         ij = ij+1
+         pmo(ij) = (ea(noca+k)-ea(nocb+i))*z(ij)+wrk(k,i)
+       end do
+     end do
 
-   do k = 1, nbf-noca
-      do j = 1, nocb
-         ij = ij + 1
-         pmo(ij) = 0.5_dp * ( (en_a(noca + k) - en_a(j)) &
-                            + (en_b(noca + k) - en_b(j)) ) * z(ij)  &
-                   + wrk(j,k)
-      end do
-   end do
-
-   wrk = 0.0_dp
-
-
-   wrk = 0.5_dp * wrk
-
-   do k = 1, nbf-noca
-      do i = 1, noca-nocb    ! i = 1,2 → lr1, lr2
-         ij = ij + 1
-         pmo(ij) = ( en_a(noca + k) - en_a(nocb + i) ) * z(ij)  &
-                   + wrk(k,i)
-      end do
-   end do
-
-   deallocate(ztmp, wrk)
-
-end subroutine umrsfrolhs
+     deallocate(ztmp, wrk)
+   end subroutine umrsfrolhs
 
    subroutine umrsfrowcal(wmo, mo_energy_a, mo_energy_b, fa, fb, xk, &
                          xhxa, xhxb, hppija, hppijb, noca, nocb)
@@ -3362,7 +3410,7 @@ end subroutine umrsfrolhs
 
      do a = 1, nbf-noca
        wmo(1:nocb,noca+a) = wmo(1:nocb,noca+a) &
-                          + 0.5_dp * ( mo_energy_a(1:nocb) + mo_energy_b(1:nocb) )*scr(1:nocb,noca+a)
+                          +  mo_energy_b(1:nocb) *scr(1:nocb,noca+a)
      end do
 
  !   ----- W_XA -----
@@ -3419,7 +3467,6 @@ end subroutine umrsfrolhs
      return
 
    end subroutine umrsfrowcal
-
 
 
 end module tdhf_mrsf_lib

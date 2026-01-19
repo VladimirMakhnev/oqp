@@ -747,7 +747,8 @@ contains
     tb => td_t(:,2)
 
 !111
-
+!222
+!333
 
     target_state = min(infos%tddft%target_state, infos%tddft%nstate)
     if (target_state /=infos%tddft%target_state) then
@@ -888,9 +889,9 @@ contains
 
 !   ALPHA: AO(M,N) -> MO(IA+)
     if (umrsf) then
-       call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_b, nocca, nocca)
+       call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
 
-       call mntoia(ab1(:,:,2), ab1_mo_b, mo_a, mo_b, noccb, noccb)
+       call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
     else
        call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
 
@@ -935,7 +936,7 @@ contains
 
 !       call show_message('Can proceed futher?', with_abort)
       if (umrsf) then
-        fmrst2 => int2_udata_st%f3(:,:,:,:,1)! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
+        fmrst2 => int2_udata_st%f3(:,:,:,:,1)! ado2v a/b, ado1v a/b, adco1 a/b, adco2 a/b, ao21v, aco12, agdlr
       else
         fmrst2 => int2_data_st%f3(:,:,:,:,1)! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
       endif
@@ -956,6 +957,22 @@ contains
         if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
            fmrst2(:,1:8,:,:) = fmrst2(:,1:8,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
         call orthogonal_transform('n', nbf, mo_a, fmrst2(1,11,:,:), wrk2, wrk1)
+
+        call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
+
+        call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
+
+        call dgemm('n', 't', nbf, nocca, nbf, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxa, nbf)
+
+        call orthogonal_transform('n', nbf, mo_b, fmrst2(1,11,:,:), wrk2, wrk1)
+
+        call dgemm('t', 'n', nbf, nbf, nocca, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxb, nbf)      
       else
         if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
            fmrst2(:,6,:,:) = fmrst2(:,6,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
@@ -964,21 +981,21 @@ contains
         if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
            fmrst2(:,1:4,:,:) = fmrst2(:,1:4,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
         call orthogonal_transform('n', nbf, mo_a, fmrst2(1,7,:,:), wrk2, wrk1)
+
+        call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
+  
+        call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
+  
+        call dgemm('n', 't', nbf, nocca, nbf, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxa, nbf)
+        call dgemm('t', 'n', nbf, nbf, nocca, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxb, nbf)
+
       endif
-
-      call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-
-      call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
-
-      call dgemm('n', 't', nbf, nocca, nbf, &
-                 2.0_dp, wrk2, nbf, &
-                         wrk3, nbf, &
-                 0.0_dp, hxa, nbf)
-      call dgemm('t', 'n', nbf, nbf, nocca, &
-                 2.0_dp, wrk2, nbf, &
-                         wrk3, nbf, &
-                 0.0_dp, hxb, nbf)
-
    ! spin pair ov-ov, co-co, co-ov coupling
 
       if (umrsf) then 
@@ -1012,19 +1029,33 @@ contains
             beta=infos%tddft%cam_beta,&
             mu=infos%tddft%cam_mu)
 
-      call orthogonal_transform('n', nbf, mo_a, int2_data_q%amb(:,:,1,1), wrk2, wrk1)
+      if (umrsf) then 
+        call orthogonal_transform('n', nbf, mo_a, int2_data_q%amb(:,:,1,1), wrk2, wrk1)
+        call iatogen(bvec_mo(:,target_state),wrk3,noccb,nocca)
+  
+        call dgemm('t', 'n', nbf, nbf, noccb, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxa, nbf)
+        call orthogonal_transform('n', nbf, mo_b, int2_data_q%amb(:,:,1,1), wrk2, wrk1)
+        call dgemm('n', 't', nbf, noccb, nbf, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxb, nbf)
+      else
+        call orthogonal_transform('n', nbf, mo_a, int2_data_q%amb(:,:,1,1), wrk2, wrk1)
+        call iatogen(bvec_mo(:,target_state),wrk3,noccb,nocca)
+  
+        call dgemm('t', 'n', nbf, nbf, noccb, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxa, nbf)
+        call dgemm('n', 't', nbf, noccb, nbf, &
+                   2.0_dp, wrk2, nbf, &
+                           wrk3, nbf, &
+                   0.0_dp, hxb, nbf)
 
-      call iatogen(bvec_mo(:,target_state),wrk3,noccb,nocca)
-
-      call dgemm('t', 'n', nbf, nbf, noccb, &
-                 2.0_dp, wrk2, nbf, &
-                         wrk3, nbf, &
-                 0.0_dp, hxa, nbf)
-      call dgemm('n', 't', nbf, noccb, nbf, &
-                 2.0_dp, wrk2, nbf, &
-                         wrk3, nbf, &
-                 0.0_dp, hxb, nbf)
-
+      endif
    !  Unrelaxed difference density matries T_ij and T_ab
    !  Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
       call dgemm('n', 't', noccb, noccb, nvira, &
@@ -1159,9 +1190,9 @@ contains
       !   ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
 
       if (umrsf) then
-          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_b, nocca, nocca)
+          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
           wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
-          call mntoia(wrk1, ab1_mo_b, mo_a, mo_b, noccb, noccb)
+          call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
       else
           call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
           wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
@@ -1227,16 +1258,18 @@ contains
 
         !     ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
         if (umrsf) then
-         call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_b, nocca, nocca)
+         call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
 
-         call mntoia(ab1(:,:,2), ab1_mo_b, mo_a, mo_b, noccb, noccb)
+         call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+         call umrsfrolhs(lhs, pk, mo_energy_a, mo_energy_b, fa, fb, &
+                         ab1_mo_a, ab1_mo_b, nocca, noccb)
         else
          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
  
          call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+         call sfrolhs(lhs, pk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
+                      nocca, noccb)
         endif
-        call sfrolhs(lhs, pk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
-                     nocca, noccb)
 
         alpha = 1.0_dp/dot_product(pk, lhs)
 
@@ -1349,9 +1382,26 @@ contains
     if (mrst==1 .or. mrst==3) then
 
       if (umrsf) then
-        call umrsfrowcal(wmo, mo_energy_a, mo_energy_b, fa, fb, xk, &
+!        call umrsfrowcal(wmo, mo_energy_a, mo_energy_a, fa, fb, xk, &
+!                        hxa, hxb, ppija, ppijb, &
+!                        nocca, noccb)
+        call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &
                         hxa, hxb, ppija, ppijb, &
                         nocca, noccb)
+        call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
+        call symmetrize_matrix(wrk2, nbf)
+!        call umrsfrowcal(wmo, mo_energy_b, mo_energy_b, fa, fb, xk, &
+!                        hxa, hxb, ppija, ppijb, &
+!                        nocca, noccb)
+        call mrsfrowcal(wmo, mo_energy_b, fa, fb, xk, &
+                        hxa, hxb, ppija, ppijb, &
+                        nocca, noccb)
+        call orthogonal_transform('t', nbf, mo_b, wmo, wrk3, wrk1)
+        call symmetrize_matrix(wrk3, nbf)
+        call pack_matrix(wrk2+wrk3, wao)
+!        call umrsfrowcal(wmo, mo_energy_a, mo_energy_b, fa, fb, xk, &
+!                        hxa, hxb, ppija, ppijb, &
+!                        nocca, noccb)
       else
         call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &
                         hxa, hxb, ppija, ppijb, &
@@ -1365,13 +1415,18 @@ contains
 
     end if
 
-    call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
-    call symmetrize_matrix(wrk2, nbf)
-    call pack_matrix(wrk2, wao)
-    wao = wao*0.5_dp
-!   ROHF, half one more time:
-    wao = wao*0.5_dp
+    if (umrsf) then
 
+        wao = wao*0.125_dp
+    else
+        call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
+        call symmetrize_matrix(wrk2, nbf)
+        call pack_matrix(wrk2, wao)
+        wao = wao*0.5_dp
+    !   ROHF, half one more time:
+        wao = wao*0.5_dp
+
+    endif
     call int2_driver%clean()
 
     if (dft) call dftclean(infos)
