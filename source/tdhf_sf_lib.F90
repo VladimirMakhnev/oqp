@@ -853,13 +853,18 @@ contains
       end do
     end do
 
-    ! Note: GAMESS W_IA_B has: XHXB + EB*ZB (using BETA orbital energies!)
-    ! No wrk term (Fock-based), no XHXA, no HPPIJA
-    wmo(1:nocb,lr1:lr2) = xhxb(1:nocb,lr1:lr2)
-    wmo(1:nocb,lr1) = wmo(1:nocb,lr1) &
-                    + mo_energy_b(1:nocb)*wrk1(1:nocb,lr1)
-    wmo(1:nocb,lr2) = wmo(1:nocb,lr2) &
-                    + mo_energy_b(1:nocb)*wrk1(1:nocb,lr2)
+    ! GAMESS SFROWCAL W_IX formula:
+    ! W(MI,MX) = EORB(MI)*WRK1(MI,MX) + HALF*DUM + XHXA(MI,MX) + XHXB(MI,MX) + HPPIJA(MI,MX)
+    ! where EORB = alpha orbital energies, DUM = wrk (Fock matrix contribution)
+    do i = 1, nocb
+      do x = 1, lr2-lr1+1
+        wmo(i, lr1+x-1) = mo_energy_a(i) * wrk1(i, lr1+x-1) &
+                        + 0.5_dp * wrk(i, x) &
+                        + xhxa(i, lr1+x-1) &
+                        + xhxb(i, lr1+x-1) &
+                        + hppija(i, lr1+x-1)
+      end do
+    end do
     ! DEBUG: W_ix block (beta-occ to singly-occ)
     write(*,'("[SFROWCAL] xhxb(1:4,5:6) norm=",ES12.4)') sqrt(sum(xhxb(1:nocb,lr1:lr2)**2))
     write(*,'("[SFROWCAL] mo_e_b*wrk1 contribution=",ES12.4)') &

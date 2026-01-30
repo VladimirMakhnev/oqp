@@ -773,6 +773,7 @@ contains
 
       call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
       call symmetrize_matrix(wrk2, nbf)
+      wrk2 = wrk2 * 0.5_dp  ! symmetrize_matrix does A+A^T, need 0.5 for (A+A^T)/2
       call pack_matrix(wrk2, wao)
 
       ! ============ DEBUG: W in AO (before scaling) ============
@@ -781,7 +782,7 @@ contains
             sqrt(sum(wao**2)), sum(abs(wao))
       write(iw,'("[WAO_BEFORE] (1:6)=",6ES11.3)') wao(1:6)
 
-      wao = wao*0.25_dp  ! ROHF factor
+      ! No additional scaling needed - 0.5 already applied above
 
       write(iw,'("[WAO_AFTER] wao: norm=",ES12.4," abssum=",ES12.4)') &
             sqrt(sum(wao**2)), sum(abs(wao))
