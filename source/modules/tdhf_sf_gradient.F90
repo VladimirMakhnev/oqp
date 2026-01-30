@@ -33,6 +33,26 @@ contains
     call tdhf_sf_gradient(inf)
   end subroutine sf_gradient_c
 
+
+!> @brief Compute SF-TDDFT analytical energy gradient
+!>
+!> The excited-state gradient consists of three contributions:
+!>
+!>   dE/dR = dE_1e/dR + dE_2e/dR + dE_xc/dR
+!>
+!> where:
+!>   dE_1e/dR = Tr[(D+P) * dH/dR] - Tr[W * dS/dR] + nuclear terms
+!>   dE_2e/dR = sum_ijkl Gamma_ijkl * d(ij|kl)/dR
+!>   dE_xc/dR = integral f_xc[P] * drho/dR (DFT only)
+!>
+!> Input (from Z-vector calculation):
+!>   - D: ground-state density matrix
+!>   - P: relaxed difference density (T + Z)
+!>   - W: energy-weighted density matrix
+!>   - V: (A-B)*X response vector
+!>
+!> Reference: Furche & Ahlrichs, JCP 117, 7433 (2002)
+!>
   subroutine tdhf_sf_gradient(infos)
     use io_constants, only: iw
     use oqp_tagarray_driver
@@ -121,15 +141,22 @@ contains
     nbf_tri = nbf*(nbf+1)/2
     s_size = (basis%nshell**2+basis%nshell)/2
 
-!   Compute 1e gradient
+! =============================================================================
+!   STEP 1: One-electron gradient
+!   Includes: nuclear repulsion, overlap (with W), kinetic, nuclear attraction
+! =============================================================================
     call flush(iw)
-
     call sf_1e_grad(infos, basis)
 
     write(iw,"(' ..... End Of 1-Eelectron Gradient ......')")
     call measure_time(print_total=1, log_unit=iw)
     call flush(iw)
 
+! =============================================================================
+!   STEP 2: Prepare density matrices for 2e and XC gradients
+!   d = ground-state density (alpha, beta)
+!   p = relaxed difference density P = T + Z (from Z-vector)
+! =============================================================================
     allocate(d(nbf,nbf,2), source=0.0d0)
     allocate(p(nbf,nbf,2), source=0.0d0)
 
@@ -139,7 +166,10 @@ contains
     call unpack_matrix(dmat_a, d(:,:,1))
     call unpack_matrix(dmat_b, d(:,:,2))
 
-!   Compute xc gradient
+! =============================================================================
+!   STEP 3: DFT exchange-correlation gradient (if DFT)
+!   dE_xc/dR = integral f_xc * dP/dR over grid
+! =============================================================================
     if (dft) then
       call dft_initialize(infos, basis, molGrid, verbose=.true.)
 
@@ -151,7 +181,6 @@ contains
            pa=p(:,:,1:1), &
            pb=p(:,:,2:2), &
            nmtx=1, &
-           !threshold=1.0d-15, &
            threshold=0.0d0, &
            infos=infos)
 
@@ -160,9 +189,13 @@ contains
       call flush(iw)
     end if
 
-!   Compute 2e gradient
+! =============================================================================
+!   STEP 4: Two-electron gradient
+!   dE_2e/dR = sum_ijkl Gamma_ijkl * d(ij|kl)/dR
+!   where Gamma is the two-particle density matrix
+! =============================================================================
     allocate(v(nbf,nbf,2), source=0.0d0)
-    v(:,:,1) = td_abxc
+    v(:,:,1) = td_abxc  ! Response vector (A-B)*X
     call sf_2e_grad(basis, infos, d, p, v(:,:,1))
 
     call print_gradient(infos)
@@ -176,6 +209,20 @@ contains
 
 !###############################################################################
 
+!> @brief Compute one-electron contribution to SF-TDDFT gradient
+!>
+!> One-electron gradient terms:
+!>   dE_1e/dR = Tr[(D+P) * dH/dR] - Tr[(L+W) * dS/dR] + V_nn
+!>
+!> where:
+!>   D = ground-state density
+!>   P = relaxed difference density (T + Z)
+!>   H = core Hamiltonian (kinetic + nuclear attraction)
+!>   L = Lagrangian from SCF (orbital energy weighted density)
+!>   W = excited-state energy-weighted density
+!>   S = overlap matrix
+!>   V_nn = nuclear repulsion gradient
+!>
   subroutine sf_1e_grad(infos, basis)
 
     use oqp_tagarray_driver
@@ -230,36 +277,39 @@ contains
              , urohf  => infos%control%scftype>=2 &
         )
 
-!     Zero out gradient
       grad = 0.0d0
-!     Nuclear repulsion force
+
+      ! Nuclear repulsion gradient: dV_nn/dR
       call grad_nn(infos%atoms, infos%basis%ecp_zn_num)
 
-!     Obtain Lagrangian matrix (`dens`)
+      ! Build Lagrangian L from SCF orbital energies
+      ! L_ij = sum_k n_k * epsilon_k * C_ik * C_jk
       call eijden(dens, nbf, infos)
 
-!     Add W matrix
+      ! Add excited-state W matrix: total Lagrangian = L + W
+      ! This gives -Tr[(L+W) * dS/dR] term in gradient
       dens = dens + w
 
-!     Overlap gradient (uses Lagrangian = eijden + W)
+      ! Overlap gradient: -Tr[(L+W) * dS/dR]
       call grad_ee_overlap(basis, dens, grad, logtol=tol)
 
-!     Compute total density matrix, discard Lagrangian
+      ! Build total density for core Hamiltonian gradient
+      ! D_total = D_ground + P_excited (alpha + beta)
       dens = dmat_a + p(:,1)
       if (infos%control%scftype>=2) then
         dens = dens + dmat_b + p(:,2)
       end if
 
-!     Hellmann-Feynman force
+      ! Hellmann-Feynman: Tr[D_total * dV_ne/dR] (point charges)
       call grad_en_hellman_feynman(basis, xyz, zn, dens, grad, logtol=tol)
 
-!     KE gradient
+      ! Kinetic energy gradient: Tr[D_total * dT/dR]
       call grad_ee_kinetic(basis, dens, grad, logtol=tol)
 
-!     Pulay force
+      ! Pulay force: Tr[D_total * dV_ne/dR] (basis function derivatives)
       call grad_en_pulay(basis, xyz, zn, dens, grad, logtol=tol)
 
-!     Effective core potential gradient
+      ! ECP gradient (if present)
       call grad_1e_ecp(infos, basis, xyz, dens, grad, logtol=tol)
 
     end associate
@@ -268,7 +318,19 @@ contains
 
 !###############################################################################
 
-!> @brief The driver for the two electron gradient
+!> @brief Driver for two-electron contribution to SF-TDDFT gradient
+!>
+!> Computes: dE_2e/dR = sum_ijkl Gamma_ijkl * d(ij|kl)/dR
+!>
+!> The two-particle density matrix Gamma contains:
+!>   - Coulomb terms: (D+P)_ij * D_kl + D_ij * P_kl
+!>   - Exchange terms: (D+P)_ik * D_jl + D_ik * P_jl (scaled by HF exchange)
+!>   - Response terms: V_ik * V_jl (from (A-B)*X, scaled by response HF exchange)
+!>
+!> @param[in] d  Ground-state density matrices (alpha, beta)
+!> @param[in] p  Relaxed difference density P = T + Z (alpha, beta)
+!> @param[in] v  Response vector (A-B)*X in AO basis
+!>
   subroutine sf_2e_grad(basis, infos, d, p, v)
 
     use basis_tools, only: basis_set
@@ -346,15 +408,29 @@ contains
 
 !###############################################################################
 
+!> @brief Initialize density matrices for 2e gradient calculation
+!>
+!> Transforms density matrices from (alpha, beta) to (total, spin) representation:
+!>   D_total = D_alpha + D_beta  (Coulomb contribution)
+!>   D_spin  = D_alpha - D_beta  (Exchange contribution)
+!>
+!> This representation simplifies the 2e gradient formulas:
+!>   Coulomb: uses D_total only
+!>   Exchange: uses both D_total and D_spin for proper spin coupling
+!>
   subroutine grd2_sf_compute_data_t_init(this)
     implicit none
     class(grd2_sf_compute_data_t), target, intent(inout) :: this
 
     call this%clean()
 
+    ! Convert ground-state density: (alpha, beta) -> (total, spin)
+    ! d2(:,:,1) = D_alpha + D_beta (total density for Coulomb)
+    ! d2(:,:,2) = D_alpha - D_beta (spin density for exchange)
     this%d2(:,:,1) = this%d2(:,:,1) +   this%d2(:,:,2)
     this%d2(:,:,2) = this%d2(:,:,1) - 2*this%d2(:,:,2)
 
+    ! Same transformation for relaxed difference density P
     this%p2(:,:,1) = this%p2(:,:,1) +   this%p2(:,:,2)
     this%p2(:,:,2) = this%p2(:,:,1) - 2*this%p2(:,:,2)
 
@@ -369,9 +445,28 @@ contains
 
 !###############################################################################
 
-!> @brief This routine forms the product of density
-!>        matrices for use in forming the two electron
-!>        gradient. Valid for closed and open shell SCF.
+!> @brief Compute two-particle density matrix elements for SF-TDDFT 2e gradient
+!>
+!> Forms the effective density Gamma_ijkl for 2e gradient:
+!>   dE_2e/dR = sum_ijkl Gamma_ijkl * d(ij|kl)/dR
+!>
+!> Gamma consists of three parts:
+!>
+!> 1. Coulomb contribution (df1_coul):
+!>    Gamma^J_ijkl = 4 * [(D+P)_ij * D_kl + D_ij * P_kl]
+!>
+!> 2. Exchange contribution (dq1, scaled by HF exchange):
+!>    Gamma^K_ijkl = -hfscale * [(D+P)_ik * D_jl + D_ik * P_jl + (ik<->il)]
+!>    Uses both total and spin densities for proper open-shell treatment
+!>
+!> 3. Response contribution (dt2, scaled by response HF exchange):
+!>    Gamma^V_ijkl = -2 * hfscale2 * [V_ik * V_jl + V_il * V_jk + transposes]
+!>    where V = (A-B)*X is the response vector
+!>
+!> @param[in]  id     Shell quartet indices (i,j,k,l)
+!> @param[out] dab    Density matrix product for this shell quartet
+!> @param[out] dabmax Maximum absolute value (for screening)
+!>
   subroutine grd2_sf_compute_data_t_get_density(this, basis, id, dab, dabmax)
 
     implicit none
@@ -390,9 +485,9 @@ contains
     real(kind=dp), pointer :: ab(:,:,:,:)
     integer :: i1, j1, k1, l1
 
-    coulfact = 4*this%coulscale
-    xcfact = this%hfscale
-    xcfact2 = this%hfscale2
+    coulfact = 4*this%coulscale    ! Coulomb prefactor
+    xcfact = this%hfscale          ! Reference HF exchange
+    xcfact2 = this%hfscale2        ! Response HF exchange
     dabmax = 0
     loc = basis%ao_offset(id)-1
 
@@ -411,11 +506,18 @@ contains
 
           do l = 1, nbf(4)
             l1 = loc(4) + l
+
+            ! ----- Coulomb contribution -----
+            ! Gamma^J = (D+P)_ij * D_kl + D_ij * P_kl
+            ! Uses total density only (index 1)
             df1 = (this%d2(i1,j1,1)+this%p2(i1,j1,1))*this%d2(k1,l1,1) &
                 +  this%d2(i1,j1,1)                  *this%p2(k1,l1,1)
             df1_coul = df1 * coulfact
 
             if (xcfact /= 0.0_dp .or. xcfact2 /= 0.0_dp) then
+              ! ----- Exchange contribution -----
+              ! Gamma^K = (D+P)_ik * D_jl + D_ik * P_jl + (ik<->il)
+              ! Uses both total (1) and spin (2) densities
               dq1 = (this%d2(i1,k1,1)+this%p2(i1,k1,1))*this%d2(j1,l1,1) &
                   +  this%d2(i1,k1,1)                  *this%p2(j1,l1,1) &
                   + (this%d2(i1,l1,1)+this%p2(i1,l1,1))*this%d2(j1,k1,1) &
@@ -424,15 +526,21 @@ contains
                   +  this%d2(i1,k1,2)                  *this%p2(j1,l1,2) &
                   + (this%d2(i1,l1,2)+this%p2(i1,l1,2))*this%d2(j1,k1,2) &
                   +  this%d2(i1,l1,2)                  *this%p2(j1,k1,2)
+
+              ! ----- Response contribution -----
+              ! Gamma^V = V_ik * V_jl + V_il * V_jk + transposes
+              ! From (A-B)*X response vector
               dt2 = this%v2(i1,k1)*this%v2(j1,l1) &
                   + this%v2(k1,i1)*this%v2(l1,j1) &
                   + this%v2(i1,l1)*this%v2(j1,k1) &
                   + this%v2(l1,i1)*this%v2(k1,j1)
 
+              ! Total: Gamma = Gamma^J - hfscale*Gamma^K - 2*hfscale2*Gamma^V
               df1 = df1_coul - xcfact*dq1 - xcfact2*2.0_dp*dt2
             else
               df1 = df1_coul
             end if
+
             dabmax = max(dabmax, abs(df1))
             ab(l,k,j,i) = df1*product(basis%bfnrm([i1,j1,k1,l1]))
           end do

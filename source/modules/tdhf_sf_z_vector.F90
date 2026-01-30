@@ -16,6 +16,34 @@ contains
   end subroutine tdhf_sf_z_vector_C
 
 
+!> @brief Solve Z-vector equation for SF-TDDFT analytical gradients
+!>
+!> This subroutine solves the coupled-perturbed equation:
+!>
+!>   (A + B) * Z = -RHS
+!>
+!> for the orbital relaxation contribution to excited-state gradients.
+!>
+!> Algorithm (preconditioned conjugate gradient):
+!>   1. Build RHS from H[T] and H[X]*X terms
+!>   2. Initialize preconditioner M = diag(epsilon_a - epsilon_i)
+!>   3. Iterate: pk -> (A+B)*pk -> update Z
+!>   4. Converge when ||residual|| < tolerance
+!>
+!> After Z-vector converges:
+!>   5. Build relaxed density P = T + Z
+!>   6. Compute H[P] response
+!>   7. Construct W matrix (energy-weighted density)
+!>
+!> Output:
+!>   - OQP_td_p: relaxed density matrices (alpha, beta)
+!>   - OQP_WAO: W matrix in AO basis for gradient
+!>
+!> Supports both UHF (separate alpha/beta) and ROHF (doc-socc-virt) references.
+!>
+!> Reference: Furche & Ahlrichs, JCP 117, 7433 (2002)
+!>            Shao, Head-Gordon, Krylov, JCP 118, 4807 (2003)
+!>
   subroutine tdhf_sf_z_vector(infos)
 
     use precision, only: dp
@@ -36,7 +64,7 @@ contains
       sfromcal, sfrogen, sfrolhs, pcgrbpini, &
       pcgb, sfropcal, sfrowcal, sfdmat, &
       ! UHF-specific functions
-      sfrcalc, xecalc, sfuesum, sfugen, umrsfrowcal
+      sfrcalc, xecalc, sfuesum, sfgen, sfpcal, sflhs, sfwcal
     use dft, only: dft_initialize, dftclean
     use mod_dft_gridint_fxc, only: utddft_fxc
     use mathlib, only: symmetrize_matrix, orthogonal_transform_sym, orthogonal_transform
@@ -208,8 +236,11 @@ contains
     ta          => td_t(:,1)
     tb          => td_t(:,2)
 
-    ! Save unrelaxed density matrices and the `b=A*x` vector for target state
-    ! For UHF: pass mo_b for correct beta virtual transformation
+! =============================================================================
+!   STEP 1: Save unrelaxed density T and response vector (A-B)*X for target state
+!   T_ij = -X_ia*X_ja (occ-occ), T_ab = X_ia*X_ib (virt-virt)
+!   These are needed for gradient: dE/dR contains Tr[T * dH/dR]
+! =============================================================================
     if (uhfref) then
       call sfdmat(bvec_mo(:,infos%tddft%target_state), td_abxc, mo_a, ta, tb, nocca, noccb, mo_b)
     else
@@ -249,18 +280,22 @@ contains
       call unpack_matrix(wrk1t, fb)
     end if
 
-  ! Make density like part
+! =============================================================================
+!   STEP 2: Compute H[T] contribution to RHS
+!   H[T]_ia = sum_jb T_jb * <ij||ab> + XC contribution
+!   This is the first term in RHS = H[T] + H[X]*X
+! =============================================================================
     call unpack_matrix(ta, pa(:,:,1))
     call unpack_matrix(tb, pa(:,:,2))
 
-  ! Initialize ERI calculations
     scale_exch = 1.0_dp
     scale_exch2 = 1.0_dp
     if (dft) then
-       scale_exch = infos%dft%HFscale    !> Reference HF exchange
-       scale_exch2 = infos%tddft%HFscale !> Response HF exchange
+       scale_exch = infos%dft%HFscale    ! Reference HF exchange scaling
+       scale_exch2 = infos%tddft%HFscale ! Response HF exchange scaling
     end if
 
+    ! Compute (A+B)[T] = 2*(ij|ab) - (ia|jb) contracted with T
     int2_data = int2_tdgrd_data_t(d2=pa, &
             int_apb=.true., &
             int_amb=.false., &
@@ -274,6 +309,7 @@ contains
             mu=infos%dft%cam_mu)
     ab1 => int2_data%apb(:,:,:,1)
 
+    ! Add DFT XC kernel contribution: f_xc[T]
     pa = pa*2
     call utddft_fxc(basis=basis, &
            molGrid=molGrid, &
@@ -288,17 +324,22 @@ contains
            threshold=0.0d0, &
            infos=infos)
 
-!   ALPHA: AO(M,N) -> MO(IA+)
+    ! Transform H[T] from AO to MO basis: ab1_mo = C^T * ab1 * C
     call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-
     call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
-  ! Initialize ERI calculations
+! =============================================================================
+!   STEP 3: Compute H[X]*X contribution to RHS
+!   H[X] = (A-B)[X] is the response matrix applied to excitation amplitudes
+!   hxa, hxb store the result for occ and virt blocks
+! =============================================================================
     call int2_data%clean()
     deallocate(int2_data)
+
+    ! Compute (A-B)[X] using TDA integrals (exchange only for SF)
     int2_data = int2_td_data_t(d2=bvec, &
             int_apb=.false., &
-            int_amb=.true., &  ! MUST be true - ab2 uses amb!
+            int_amb=.true., &
             tamm_dancoff=.true., &
             scale_exchange=scale_exch2)
 
@@ -309,46 +350,54 @@ contains
             mu=infos%tddft%cam_mu)
     ab2 => int2_data%amb(:,:,:,1)
 
+    ! Transform (A-B)[X] to MO basis
     if (uhfref) then
-      ! UHF: H[X] connects alpha and beta spaces
-      ! wrk2 = mo_a^T * ab2 * mo_b (not mo_a^T * ab2 * mo_a!)
+      ! UHF: mixed alpha-beta transformation (alpha_occ x beta_virt)
       call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, ab2(:,:,1), nbf, mo_b, nbf, 0.0_dp, wrk1, nbf)
       call dgemm('t', 'n', nbf, nbf, nbf, 1.0_dp, mo_a, nbf, wrk1, nbf, 0.0_dp, wrk2, nbf)
     else
-      ! ROHF: standard symmetric transformation
+      ! ROHF: symmetric transformation with alpha MOs
       call orthogonal_transform('n', nbf, mo_a, ab2(:,:,1), wrk2, wrk1)
     end if
 
+    ! Expand X from packed to full matrix form
     call iatogen(bvec_mo(:,infos%tddft%target_state), wrk3, nocca, noccb)
 
+    ! hxa(p,i) = 2 * sum_q H[X]_pq * X_qi  (for occupied index i)
     call dgemm('n', 't', nbf, nocca, nbf,  &
                2.0_dp, wrk2, nbf,  &
                        wrk3, nbf,  &
                0.0_dp, hxa,  nbf)
 
+    ! hxb(p,q) = 2 * X^T * H[X]  (full matrix for virtual block)
     call dgemm('t', 'n', nbf, nbf, nocca,  &
                2.0_dp, wrk2, nbf,  &
                        wrk3, nbf,  &
                0.0_dp, hxb,  nbf)
 
-!   Unrelaxed difference density matries T_ij and T_ab
-!     Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
+! =============================================================================
+!   STEP 4: Build unrelaxed difference density matrices T_ij and T_ab
+!   T_ij = -sum_a X_ia * X_ja  (occupied-occupied block, electron depletion)
+!   T_ab = +sum_i X_ia * X_ib  (virtual-virtual block, electron population)
+! =============================================================================
     call dgemm('n', 't', nocca, nocca, nvirb,  &
               -1.0_dp, bvec_mo(:,infos%tddft%target_state), nocca,  &
                        bvec_mo(:,infos%tddft%target_state), nocca,  &
                0.0_dp, tij,     nocca)
 
-    ! Tb(a-,b-):= X(i+,a-)*X(i+,b-) for singlet and triplet
     call dgemm('t', 'n', nvirb, nvirb, nocca,  &
                1.0_dp, bvec_mo(:,infos%tddft%target_state), nocca,  &
                        bvec_mo(:,infos%tddft%target_state), nocca,  &
                0.0_dp, tab,     nvirb)
 
+! =============================================================================
+!   STEP 5: Build full RHS of Z-vector equation
+!   RHS_ia = H[T]_ia + (H[X]*X)_ia
+!   This is the right-hand side of (A+B)*Z = -RHS
+! =============================================================================
     if (uhfref) then
-      ! UHF: simple alpha+beta blocks
       call sfrcalc(rhs, ab1_mo_a, ab1_mo_b, hxa, hxb, nocca, noccb)
     else
-      ! ROHF: doc-socc-virt structure
       call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
                    Tij, Tab, Fa, Fb, nocca, noccb)
     end if
@@ -357,13 +406,18 @@ contains
              &/6x,"START Z-VECTOR LOOP"&
              &/3x,25("-")/)')
 
+! =============================================================================
+!   STEP 6: Initialize preconditioned conjugate gradient (PCG) solver
+!   Preconditioner M_ia = 1/(epsilon_a - epsilon_i) for fast convergence
+!   Initial guess: Z = M * RHS
+! =============================================================================
     if (uhfref) then
-      ! UHF: XM = orbital energy differences for alpha and beta
+      ! UHF: orbital energy differences for alpha and beta blocks separately
       call xecalc(xm(1:nocca*nvira), mo_energy_a, nocca)
       call xecalc(xm(nocca*nvira+1:lzdim), mo_energy_b, noccb)
       xminv = 1.0_dp / xm
     else
-      ! ROHF: uses Fock matrices
+      ! ROHF: uses Fock matrix elements for doc-socc-virt structure
       call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
     end if
 
@@ -371,16 +425,19 @@ contains
 
     write(iw,'(" INITIAL ERROR =",3X,1P,E10.3,1X,"/",1P,E10.3)') error, cnvtol
 
-! -----------------------------------------------
-
+! =============================================================================
+!   STEP 7: PCG iteration loop
+!   Each iteration: pk -> (A+B)*pk (via 2e integrals) -> update Z
+!   Converge when ||residual||^2 < tolerance
+! =============================================================================
     do iter = 1, infos%control%maxit_zv
       if (uhfref) then
         ! UHF: convert Z-vector to AO for alpha and beta separately
         ! Alpha: pk(1:nocca*nvira) -> pa(:,:,1)
-        call sfugen(wrk1, pk(1:nocca*nvira), nocca, nbf)
+        call sfgen(wrk1, pk(1:nocca*nvira), nocca, nbf)
         call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
         ! Beta: pk(nocca*nvira+1:lzdim) -> pa(:,:,2)
-        call sfugen(wrk2, pk(nocca*nvira+1:lzdim), noccb, nbf)
+        call sfgen(wrk2, pk(nocca*nvira+1:lzdim), noccb, nbf)
         call orthogonal_transform('t', nbf, mo_b, wrk2, pa(:,:,2), wrk3)
       else
         ! ROHF: doc-socc-virt structure
@@ -432,25 +489,8 @@ contains
         call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
         ! UHF: LHS = (A+B)*pk + (E_a - E_i)*pk
-        ! First copy (A+B)*pk part to lhs
-        lhs = 0.0_dp
-        ! Alpha part
-        do j = 1, nvira
-          do i = 1, nocca
-            ij = (j-1)*nocca + i
-            lhs(ij) = ab1_mo_a(i, j)
-          end do
-        end do
-        ! Beta part
-        do j = 1, nvirb
-          do i = 1, noccb
-            ij = nocca*nvira + (j-1)*noccb + i
-            lhs(ij) = ab1_mo_b(i, j)
-          end do
-        end do
-        ! Add diagonal (E_a - E_i)*pk
-        call sfuesum(lhs(1:nocca*nvira), mo_energy_a, pk(1:nocca*nvira), nocca)
-        call sfuesum(lhs(nocca*nvira+1:lzdim), mo_energy_b, pk(nocca*nvira+1:lzdim), noccb)
+        call sflhs(lhs, pk, mo_energy_a, mo_energy_b, ab1_mo_a, ab1_mo_b, &
+                   nocca, noccb, nvira, nvirb)
       else
         ! ROHF: doc-socc-virt structure
 !       ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
@@ -493,151 +533,31 @@ contains
 
     call flush(iw)
 
-    ! ============ DEBUG: Z-VECTOR SOLUTION ============
-    write(iw,'(/,"======== DEBUG: Z-VECTOR SOLUTION ========")')
-    write(iw,'("[ZV_SOLN] xk: norm=",ES12.4," abssum=",ES12.4)') &
-          sqrt(sum(xk**2)), sum(abs(xk))
-    write(iw,'("[ZV_SOLN] xk(1:6)=",6ES11.3)') xk(1:6)
-    write(iw,'("[ZV_SOLN] xk alpha part (1:",I0,"): norm=",ES12.4)') &
-          nocca*nvira, sqrt(sum(xk(1:nocca*nvira)**2))
-    write(iw,'("[ZV_SOLN] xk beta part (",I0,":",I0,"): norm=",ES12.4)') &
-          nocca*nvira+1, lzdim, sqrt(sum(xk(nocca*nvira+1:lzdim)**2))
-    call flush(iw)
-
+! =============================================================================
+!   STEP 8: Construct relaxed density matrix P = T + Z
+!   P contains both unrelaxed (T) and orbital relaxation (Z) contributions
+!   Used for: gradient = Tr[P * dH/dR] + Tr[W * dS/dR] + 2e terms
+! =============================================================================
     if (uhfref) then
-      ! UHF: construct density from T + Z
-      ! Alpha: wrk1(i,j) = Tij(i,j), wrk1(i,a) = xk(i,a)  [no factor of 0.5!]
-      wrk1 = 0.0_dp
-      wrk1(1:nocca, 1:nocca) = tij
-      do j = 1, nvira
-        do i = 1, nocca
-          ij = (j-1)*nocca + i
-          wrk1(i, nocca+j) = xk(ij)
-        end do
-      end do
-      ! Beta: wrk2(a,b) = Tab(a,b), wrk2(i,a) = xk(nconfa+i,a)  [no factor of 0.5!]
-      wrk2 = 0.0_dp
-      do j = 1, nvirb
-        do i = 1, nvirb
-          wrk2(noccb+i, noccb+j) = tab(i, j)
-        end do
-      end do
-      do j = 1, nvirb
-        do i = 1, noccb
-          ij = nocca*nvira + (j-1)*noccb + i
-          wrk2(i, noccb+j) = xk(ij)
-        end do
-      end do
-
-      ! ============ DEBUG: DENSITY MATRICES IN MO ============
-      write(iw,'(/,"======== DEBUG: DENSITY IN MO ========")')
-      write(iw,'("[DEN_MO_A] wrk1: norm=",ES12.4," abssum=",ES12.4)') &
-            sqrt(sum(wrk1**2)), sum(abs(wrk1))
-      write(iw,'("[DEN_MO_A] wrk1(1:3,1:3)=",3ES11.3)') wrk1(1,1:3), wrk1(2,1:3), wrk1(3,1:3)
-      write(iw,'("[DEN_MO_A] Tij block norm=",ES12.4)') sqrt(sum(tij**2))
-      write(iw,'("[DEN_MO_B] wrk2: norm=",ES12.4," abssum=",ES12.4)') &
-            sqrt(sum(wrk2**2)), sum(abs(wrk2))
-      write(iw,'("[DEN_MO_B] wrk2(1:3,1:3)=",3ES11.3)') wrk2(1,1:3), wrk2(2,1:3), wrk2(3,1:3)
-      write(iw,'("[DEN_MO_B] Tab block norm=",ES12.4)') sqrt(sum(tab**2))
-
-      ! ============ DEBUG: Separate T_AO and Z_AO ============
-      ! Use wrk3 as temporary workspace for T_ao/Z_ao debug
-      ! Alpha T: just occ-occ part (Tij)
-      wrk3 = 0.0_dp
-      wrk3(1:nocca, 1:nocca) = tij
-      call orthogonal_transform('t', nbf, mo_a, wrk3, pa(:,:,1), wrk2)
-      write(iw,'("[T_AO_A] norm=",ES12.4)') sqrt(sum(pa(:,:,1)**2))
-
-      ! Alpha Z: just occ-vir part (xk, no factor of 0.5)
-      wrk3 = 0.0_dp
-      do j = 1, nvira
-        do i = 1, nocca
-          wrk3(i, nocca+j) = xk((j-1)*nocca + i)
-        end do
-      end do
-      call orthogonal_transform('t', nbf, mo_a, wrk3, pa(:,:,2), wrk2)
-      write(iw,'("[Z_AO_A] norm=",ES12.4)') sqrt(sum(pa(:,:,2)**2))
-
-      ! Beta T: just vir-vir part (Tab)
-      wrk3 = 0.0_dp
-      do j = 1, nvirb
-        do i = 1, nvirb
-          wrk3(noccb+i, noccb+j) = tab(i, j)
-        end do
-      end do
-      call orthogonal_transform('t', nbf, mo_b, wrk3, pa(:,:,1), wrk2)
-      write(iw,'("[T_AO_B] norm=",ES12.4)') sqrt(sum(pa(:,:,1)**2))
-
-      ! Beta Z: just occ-vir part (xk, no factor of 0.5)
-      wrk3 = 0.0_dp
-      do j = 1, nvirb
-        do i = 1, noccb
-          wrk3(i, noccb+j) = xk(nocca*nvira + (j-1)*noccb + i)
-        end do
-      end do
-      call orthogonal_transform('t', nbf, mo_b, wrk3, pa(:,:,2), wrk2)
-      write(iw,'("[Z_AO_B] norm=",ES12.4)') sqrt(sum(pa(:,:,2)**2))
-      call flush(iw)
-      ! ============ END DEBUG ============
-
-      ! Need to restore wrk1, wrk2 for actual calculation (they got overwritten)
-      ! Alpha: wrk1(i,j) = Tij(i,j), wrk1(i,a) = xk(i,a)
-      wrk1 = 0.0_dp
-      wrk1(1:nocca, 1:nocca) = tij
-      do j = 1, nvira
-        do i = 1, nocca
-          wrk1(i, nocca+j) = xk((j-1)*nocca + i)
-        end do
-      end do
-      ! Beta: wrk2(a,b) = Tab(a,b), wrk2(i,a) = xk(nconfa+i,a)
-      wrk2 = 0.0_dp
-      do j = 1, nvirb
-        do i = 1, nvirb
-          wrk2(noccb+i, noccb+j) = tab(i, j)
-        end do
-      end do
-      do j = 1, nvirb
-        do i = 1, noccb
-          wrk2(i, noccb+j) = xk(nocca*nvira + (j-1)*noccb + i)
-        end do
-      end do
+      call sfpcal(wrk1, wrk2, tij, tab, xk, nocca, noccb, nvira, nvirb)
     else
-      ! ROHF: doc-socc-virt structure
       call sfropcal(wrk1, wrk2, tij, tab, xk, nocca, noccb)
     end if
 
- !  Update density for alpha
+    ! Transform P from MO to AO basis: P_AO = C * P_MO * C^T
     call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
-
- !  Update density for beta
     call orthogonal_transform('t', nbf, mo_b, wrk2, pa(:,:,2), wrk3)
 
-    ! ============ DEBUG: DENSITY IN AO (before symmetrize) ============
-    write(iw,'(/,"======== DEBUG: DENSITY IN AO ========")')
-    write(iw,'("[DEN_AO_A] pa(:,:,1): norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-          sqrt(sum(pa(:,:,1)**2)), sum(abs(pa(:,:,1))), sum([(pa(i,i,1), i=1,nbf)])
-    write(iw,'("[DEN_AO_A] (1:3,1:3)=",3ES11.3)') pa(1,1:3,1), pa(2,1:3,1), pa(3,1:3,1)
-    write(iw,'("[DEN_AO_B] pa(:,:,2): norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-          sqrt(sum(pa(:,:,2)**2)), sum(abs(pa(:,:,2))), sum([(pa(i,i,2), i=1,nbf)])
-    write(iw,'("[DEN_AO_B] (1:3,1:3)=",3ES11.3)') pa(1,1:3,2), pa(2,1:3,2), pa(3,1:3,2)
-    ! Check symmetry of density: ||A - A^T||
-    write(iw,'("[DEN_AO_A] asymmetry=",ES12.4)') &
-          sqrt(sum((pa(:,:,1) - transpose(pa(:,:,1)))**2))
-    write(iw,'("[DEN_AO_B] asymmetry=",ES12.4)') &
-          sqrt(sum((pa(:,:,2) - transpose(pa(:,:,2)))**2))
-    ! NOTE: Do NOT symmetrize! GAMESS uses asymmetric density for UTD2E
-    call flush(iw)
-
+! =============================================================================
+!   STEP 9: Compute H[P] response for W matrix construction
+!   H[P]_ij = sum_kl P_kl * <ik||jl> + XC contribution
+!   This enters the energy-weighted density W_ij
+! =============================================================================
     call int2_data%clean()
     deallocate(int2_data)
     int2_data = int2_tdgrd_data_t(d2=pa, &
             int_apb=.true., int_amb=.false., tamm_dancoff=.false., &
             scale_exchange=scale_exch)
-
-    ! Print input to int2_driver
-    write(iw,'("[int2_data%d2(1)] norm=",ES12.4)') sqrt(sum(int2_data%d2(:,:,1)**2))
-    write(iw,'("[int2_data%d2(2)] norm=",ES12.4)') sqrt(sum(int2_data%d2(:,:,2)**2))
-    call flush(iw)
 
     call int2_driver%run(int2_data, &
             cam=dft.and.infos%dft%cam_flag, &
@@ -646,22 +566,14 @@ contains
             mu=infos%dft%cam_mu)
     ab1 => int2_data%apb(:,:,:,1)
 
-    ! ============ DEBUG: (A+B)[P] 2e integrals ============
-    write(iw,'(/,"======== DEBUG: (A+B)[P] ========")')
-    write(iw,'("[APB_A] ab1(:,:,1): norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-          sqrt(sum(ab1(:,:,1)**2)), sum(abs(ab1(:,:,1))), sum([(ab1(i,i,1), i=1,nbf)])
-    write(iw,'("[APB_A] (1:3,1:3)=",3ES11.3)') ab1(1,1:3,1), ab1(2,1:3,1), ab1(3,1:3,1)
-    write(iw,'("[APB_B] ab1(:,:,2): norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-          sqrt(sum(ab1(:,:,2)**2)), sum(abs(ab1(:,:,2))), sum([(ab1(i,i,2), i=1,nbf)])
-    write(iw,'("[APB_B] (1:3,1:3)=",3ES11.3)') ab1(1,1:3,2), ab1(2,1:3,2), ab1(3,1:3,2)
-    call flush(iw)
-
+    ! Save relaxed density to output array (symmetrized and packed)
     call symmetrize_matrix(pa(:,:,1), nbf)
     call symmetrize_matrix(pa(:,:,2), nbf)
     call pack_matrix(pa(:,:,1), td_p(:,1))
     call pack_matrix(pa(:,:,2), td_p(:,2))
     td_p = 0.5_dp*td_p
 
+    ! Add DFT XC kernel contribution to H[P]
     call utddft_fxc(basis=basis, &
            molGrid=molGrid, &
            isVecs=.true., &
@@ -672,11 +584,11 @@ contains
            dxa=pa(:,:,1:1), &
            dxb=pa(:,:,2:2), &
            nmtx=1, &
-           !threshold=1.0d-15, &
            threshold=0.0d0, &
            infos=infos)
 
-!   ALPHA AO(M,N) -> MO(I-,J-) ... LPPIJA
+    ! Transform H[P] to MO basis: ppij = C^T * H[P] * C (occ-occ block)
+    ! ppija_ij = H[P]_ij for alpha occupied orbitals
     call dgemm('n', 'n', nbf, nocca, nbf,  &
                1.0_dp, ab1(:,:,1), nbf,  &
                        mo_a, nbf,  &
@@ -685,7 +597,8 @@ contains
                1.0_dp, mo_a,  nbf,  &
                        wrk2,  nbf,  &
                0.0_dp, ppija, nocca)
-!   BETA: AO(M,N) -> MO(I-,J-) ... LPPIJB
+
+    ! ppijb_ij = H[P]_ij for beta occupied orbitals
     call dgemm('n', 'n', nbf, noccb, nbf,  &
                1.0_dp, ab1(:,:,2), nbf,  &
                        mo_b, nbf,  &
@@ -695,99 +608,58 @@ contains
                        wrk2,  nbf,  &
                0.0_dp, ppijb, noccb)
 
-    ! ============ DEBUG: PPIJ matrices ============
-    write(iw,'(/,"======== DEBUG: PPIJ ========")')
-    write(iw,'("[PPIJA] ppija: norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-          sqrt(sum(ppija**2)), sum(abs(ppija)), sum([(ppija(i,i), i=1,nocca)])
-    write(iw,'("[PPIJA] (1:3,1:3)=",3ES11.3)') ppija(1,1:3), ppija(2,1:3), ppija(3,1:3)
-    write(iw,'("[PPIJB] ppijb: norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-          sqrt(sum(ppijb**2)), sum(abs(ppijb)), sum([(ppijb(i,i), i=1,noccb)])
-    write(iw,'("[PPIJB] (1:3,1:3)=",3ES11.3)') ppijb(1,1:3), ppijb(2,1:3), ppijb(3,1:3)
-    call flush(iw)
-
-!   Calculate W (in MO basis)
+! =============================================================================
+!   STEP 10: Compute energy-weighted density matrix W
+!   W enforces orbital orthonormality: dE/dR += sum_pq W_pq * dS_pq/dR
+!   W_ij contains occupied orbital contributions
+!   W_ab contains virtual orbital contributions
+!   W_ia contains occ-virt coupling from Z-vector
+! =============================================================================
     wmo => wrk3
     wmo = 0
 
     if (uhfref) then
-      ! UHF: Use separate alpha/beta W matrices (GAMESS SFWCALC structure)
+      ! UHF: separate alpha and beta W matrices
       block
         real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:), wao_a(:), wao_b(:)
         allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
         allocate(wao_a(nbf_tri), wao_b(nbf_tri), source=0.0_dp)
 
-        call umrsfrowcal(wmo_a, wmo_b, sf_energies(infos%tddft%target_state), &
-                         mo_energy_a, mo_energy_b, fa, fb, &
-                         bvec_mo(:,infos%tddft%target_state), xk, &
-                         hxb, ppija, ppijb, nocca, noccb)
+        ! Compute W in MO basis using sfwcal
+        call sfwcal(wmo_a, wmo_b, sf_energies(infos%tddft%target_state), &
+                    mo_energy_a, mo_energy_b, fa, fb, &
+                    bvec_mo(:,infos%tddft%target_state), xk, &
+                    hxb, ppija, ppijb, nocca, noccb)
 
-        ! ============ DEBUG: W matrices (MO basis) ============
-        write(iw,'(/,"======== DEBUG: W MATRIX (UHF separate) ========")')
-        write(iw,'("[WMOA] wmo_a: norm=",ES12.4)') sqrt(sum(wmo_a**2))
-        write(iw,'("[WMOB] wmo_b: norm=",ES12.4)') sqrt(sum(wmo_b**2))
-        ! DEBUG: Check MO coefficients
-        write(iw,'("[MO_A] mo_a: norm=",ES12.4)') sqrt(sum(mo_a**2))
-        write(iw,'("[MO_B] mo_b: norm=",ES12.4)') sqrt(sum(mo_b**2))
-        call flush(iw)
-
-        ! Transform alpha W: WMO_A -> WAO_A using mo_a
-        ! DEBUG: Before symmetrization
+        ! Transform W_alpha: MO -> AO, then symmetrize and pack
         call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
-        write(iw,'("[WAOA_BEFORE_SYM] norm=",ES12.4)') sqrt(sum(wrk2**2))
         call symmetrize_matrix(wrk2, nbf)
-        wrk2 = wrk2 * 0.5_dp  ! symmetrize_matrix does A+A^T, need 0.5 for (A+A^T)/2
+        wrk2 = wrk2 * 0.5_dp
         call pack_matrix(wrk2, wao_a)
-        write(iw,'("[WAOA_FULL] norm=",ES12.4)') sqrt(sum(wrk2**2))
-        write(iw,'("[WAOA_PACKED] norm=",ES12.4)') sqrt(sum(wao_a**2))
 
-        ! Transform beta W: WMO_B -> WAO_B using mo_b
+        ! Transform W_beta: MO -> AO, then symmetrize and pack
         call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
         call symmetrize_matrix(wrk2, nbf)
-        wrk2 = wrk2 * 0.5_dp  ! symmetrize_matrix does A+A^T, need 0.5 for (A+A^T)/2
+        wrk2 = wrk2 * 0.5_dp
         call pack_matrix(wrk2, wao_b)
-        write(iw,'("[WAOB_FULL] norm=",ES12.4)') sqrt(sum(wrk2**2))
-        write(iw,'("[WAOB_PACKED] norm=",ES12.4)') sqrt(sum(wao_b**2))
 
-        ! Combine: wao = wao_a + wao_b (both contribute to gradient)
-        ! No extra scaling - the 0.5 was already applied in symmetrization
+        ! Total W in AO = W_alpha + W_beta
         wao = wao_a + wao_b
-
-        write(iw,'("[WAO_COMBINED] wao: norm=",ES12.4)') sqrt(sum(wao**2))
-        call flush(iw)
 
         deallocate(wmo_a, wmo_b, wao_a, wao_b)
       end block
     else
-      ! ROHF: Use original sfrowcal (single W matrix)
+      ! ROHF: single W matrix using shared MO basis
       call sfrowcal(wmo,sf_energies(infos%tddft%target_state), &
                     mo_energy_a, mo_energy_b, fa, fb, bvec_mo(:,infos%tddft%target_state), xk, &
                     hxa, hxb, ppija, ppijb, &
                     nocca, noccb)
 
-      ! ============ DEBUG: W matrix ============
-      write(iw,'(/,"======== DEBUG: W MATRIX ========")')
-      write(iw,'("[WMO] wmo: norm=",ES12.4," abssum=",ES12.4," trace=",ES12.4)') &
-            sqrt(sum(wmo**2)), sum(abs(wmo)), sum([(wmo(i,i), i=1,nbf)])
-      write(iw,'("[WMO] (1:3,1:3)=",3ES11.3)') wmo(1,1:3), wmo(2,1:3), wmo(3,1:3)
-      call flush(iw)
-
+      ! Transform W: MO -> AO, then symmetrize and pack
       call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
       call symmetrize_matrix(wrk2, nbf)
-      wrk2 = wrk2 * 0.5_dp  ! symmetrize_matrix does A+A^T, need 0.5 for (A+A^T)/2
+      wrk2 = wrk2 * 0.5_dp
       call pack_matrix(wrk2, wao)
-
-      ! ============ DEBUG: W in AO (before scaling) ============
-      write(iw,'(/,"======== DEBUG: W in AO ========")')
-      write(iw,'("[WAO_BEFORE] wao: norm=",ES12.4," abssum=",ES12.4)') &
-            sqrt(sum(wao**2)), sum(abs(wao))
-      write(iw,'("[WAO_BEFORE] (1:6)=",6ES11.3)') wao(1:6)
-
-      ! No additional scaling needed - 0.5 already applied above
-
-      write(iw,'("[WAO_AFTER] wao: norm=",ES12.4," abssum=",ES12.4)') &
-            sqrt(sum(wao**2)), sum(abs(wao))
-      write(iw,'("[WAO_AFTER] (1:6)=",6ES11.3)') wao(1:6)
-      call flush(iw)
     end if
 
     call int2_driver%clean()
