@@ -238,10 +238,10 @@ contains
 !     Obtain Lagrangian matrix (`dens`)
       call eijden(dens, nbf, infos)
 
-!     Add W matrix:
-      dens = dens + 2*w
+!     Add W matrix
+      dens = dens + w
 
-!     Overlap gradient
+!     Overlap gradient (uses Lagrangian = eijden + W)
       call grad_ee_overlap(basis, dens, grad, logtol=tol)
 
 !     Compute total density matrix, discard Lagrangian
@@ -275,6 +275,7 @@ contains
     use precision, only: dp
     use messages, only: show_message, WITH_ABORT
     use types, only: information
+    use io_constants, only: iw
 
     implicit none
 
@@ -381,7 +382,7 @@ contains
     real(kind=dp), target, intent(out) :: dab(*)
     real(kind=dp), intent(out) :: dabmax
 
-    real(kind=dp) :: df1, dq1, dt2
+    real(kind=dp) :: df1, dq1, dt2, df1_coul
     real(kind=dp) :: coulfact, xcfact, xcfact2
     integer :: i, j, k, l
     integer :: loc(4)
@@ -412,7 +413,7 @@ contains
             l1 = loc(4) + l
             df1 = (this%d2(i1,j1,1)+this%p2(i1,j1,1))*this%d2(k1,l1,1) &
                 +  this%d2(i1,j1,1)                  *this%p2(k1,l1,1)
-            df1 = df1 * coulfact
+            df1_coul = df1 * coulfact
 
             if (xcfact /= 0.0_dp .or. xcfact2 /= 0.0_dp) then
               dq1 = (this%d2(i1,k1,1)+this%p2(i1,k1,1))*this%d2(j1,l1,1) &
@@ -428,7 +429,9 @@ contains
                   + this%v2(i1,l1)*this%v2(j1,k1) &
                   + this%v2(l1,i1)*this%v2(k1,j1)
 
-              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*dt2
+              df1 = df1_coul - xcfact*dq1 - xcfact2*2.0_dp*dt2
+            else
+              df1 = df1_coul
             end if
             dabmax = max(dabmax, abs(df1))
             ab(l,k,j,i) = df1*product(basis%bfnrm([i1,j1,k1,l1]))
@@ -436,6 +439,7 @@ contains
         end do
       end do
     end do
+
   end subroutine grd2_sf_compute_data_t_get_density
 
 !###############################################################################

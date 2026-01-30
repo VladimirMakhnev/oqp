@@ -1,4 +1,4 @@
-module tdhf_mrsf_gradient_mod
+module tdhf_sf_gradient_mod
 
   use precision, only: dp
   use grd2, only: grd2_driver, grd2_compute_data_t

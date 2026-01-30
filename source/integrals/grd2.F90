@@ -122,8 +122,17 @@ contains
       call grd2_driver_gen(infos, basis, de_internal, gcomp)
       de = de + de_internal
     else
-      gcomp%hfscale = infos%dft%hfscale
-      gcomp%hfscale2 = infos%tddft%hfscale
+      ! For pure HF (not DFT), hfscale = -1.0 means "use default = 1.0"
+      if (infos%dft%hfscale < 0.0d0) then
+        gcomp%hfscale = 1.0d0
+      else
+        gcomp%hfscale = infos%dft%hfscale
+      end if
+      if (infos%tddft%hfscale < 0.0d0) then
+        gcomp%hfscale2 = 1.0d0
+      else
+        gcomp%hfscale2 = infos%tddft%hfscale
+      end if
       call grd2_driver_gen(infos, basis, de, gcomp)
     end if
 

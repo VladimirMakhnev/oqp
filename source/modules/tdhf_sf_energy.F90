@@ -79,6 +79,7 @@ contains
     real(kind=dp) :: mxerr, cnvtol, scale_exch
     integer :: maxvec, target_state
     logical :: roref = .false.
+    logical :: uhfref = .false.
 
     type(int2_compute_t) :: int2_driver
     type(int2_td_data_t), target :: int2_data
@@ -106,6 +107,7 @@ contains
     
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
+    if (scf_type==2) uhfref = .true.
 
     dft = infos%control%hamilton == 20
 
@@ -145,7 +147,7 @@ contains
     mxvec = min(maxvec*nstates, xvec_dim)
     nstates = min(nstates, mxvec)
     nvec = nstates
-    nvec = min(max(2*nstates, 5), mxvec)
+    nvec = min(max(2*nstates, 20), mxvec)
     nmax = nvec
 
     call infos%dat%remove_records(tags_alloc)
@@ -381,7 +383,12 @@ contains
     call get_transition_dipole(basis, dip, mo_a, trden, nstates)
 
     do ist = 1, nstates
-      call sfdmat(bvec_mo(:,ist),abxc,mo_a,ta,tb,nocca,noccb)
+      ! For UHF: pass mo_b for correct beta virtual transformation
+      if (uhfref) then
+        call sfdmat(bvec_mo(:,ist),abxc,mo_a,ta,tb,nocca,noccb,mo_b)
+      else
+        call sfdmat(bvec_mo(:,ist),abxc,mo_a,ta,tb,nocca,noccb)
+      end if
       spin_square(ist) = get_spin_square(dmat_a,dmat_b,ta,tb,abxc,Smat,noccb,nocca)
     end do
 

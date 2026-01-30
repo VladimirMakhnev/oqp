@@ -151,16 +151,18 @@ contains
   end subroutine trfrmb
 
   subroutine sfdmat(bvec,abxc,mo_a,ta,tb, &
-                    noca,nocb)
+                    noca,nocb,mo_b)
     use precision, only: dp
     use tdhf_lib, only: iatogen
     use mathlib, only: pack_matrix
     use mathlib, only: orthogonal_transform
+    use io_constants, only: iw
 
     implicit none
 
     real(kind=dp), intent(in), dimension(:) :: bvec
     real(kind=dp), intent(in), dimension(:,:) :: mo_a
+    real(kind=dp), intent(in), dimension(:,:), optional :: mo_b
     real(kind=dp), intent(inout), dimension(:,:) :: abxc
     real(kind=dp), intent(out), dimension(:) :: ta, tb
     integer, intent(in) :: noca, nocb
@@ -177,9 +179,28 @@ contains
 
   ! MO(I+,A-) -> AO(M,N)
     nvirb = nbf-nocb
+    write(iw,'("DBG sfdmat ENTRY: noca=",I3," nocb=",I3," mo_b_present=",L1)') &
+          noca, nocb, present(mo_b)
+    call flush(iw)
 
     call iatogen(bvec,scr1,noca,nocb)
-    call orthogonal_transform('t', nbf, mo_a, scr1, abxc, scr2)
+    ! Transform X from MO to AO basis
+    ! For UHF: X_AO = mo_a * X_MO * mo_b^T (asymmetric transformation)
+    ! For RHF/ROHF: X_AO = mo_a * X_MO * mo_a^T (symmetric transformation)
+    if (present(mo_b)) then
+      write(iw,'("DBG sfdmat: UHF path, mo_b present")')
+      write(iw,'("DBG sfdmat: scr1 (X_MO) norm=",ES12.4)') sqrt(sum(scr1**2))
+      call flush(iw)
+      ! UHF case: left multiply by mo_a, right multiply by mo_b^T
+      call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, mo_a, nbf, scr1, nbf, 0.0_dp, scr2, nbf)
+      call dgemm('n', 't', nbf, nbf, nbf, 1.0_dp, scr2, nbf, mo_b, nbf, 0.0_dp, abxc, nbf)
+      write(iw,'("DBG sfdmat: abxc (X_AO) norm=",ES12.4)') sqrt(sum(abxc**2))
+      call flush(iw)
+    else
+      write(iw,'("DBG sfdmat: ROHF path, mo_b NOT present")')
+      call flush(iw)
+      call orthogonal_transform('t', nbf, mo_a, scr1, abxc, scr2)
+    end if
 
   ! Unrelaxed difference density matrix -----
 
@@ -206,14 +227,26 @@ contains
                0.0_dp,scr1,nvirb)
 
   ! MO(A-,B-) -> AO(M,N)
-    call dgemm('n','n',nbf,nvirb,nvirb, &
-               1.0_dp,mo_a(:,nocb+1:),nbf, &
-                      scr1,nvirb, &
-               0.0_dp,scr2,nbf)
-    call dgemm('n','t',nbf,nbf,nvirb, &
-               1.0_dp,scr2,nbf, &
-                      mo_a(:,nocb+1:),nbf, &
-               0.0_dp,scr1,nbf)
+  ! For UHF: use beta MO coefficients for virtual-virtual block
+    if (present(mo_b)) then
+      call dgemm('n','n',nbf,nvirb,nvirb, &
+                 1.0_dp,mo_b(:,nocb+1:),nbf, &
+                        scr1,nvirb, &
+                 0.0_dp,scr2,nbf)
+      call dgemm('n','t',nbf,nbf,nvirb, &
+                 1.0_dp,scr2,nbf, &
+                        mo_b(:,nocb+1:),nbf, &
+                 0.0_dp,scr1,nbf)
+    else
+      call dgemm('n','n',nbf,nvirb,nvirb, &
+                 1.0_dp,mo_a(:,nocb+1:),nbf, &
+                        scr1,nvirb, &
+                 0.0_dp,scr2,nbf)
+      call dgemm('n','t',nbf,nbf,nvirb, &
+                 1.0_dp,scr2,nbf, &
+                        mo_a(:,nocb+1:),nbf, &
+                 0.0_dp,scr1,nbf)
+    end if
     call pack_matrix(scr1,tb)
 
     deallocate(scr1,scr2)
@@ -751,7 +784,7 @@ contains
 
   end subroutine sfropcal
 
-  subroutine sfrowcal(wmo, target_energy, mo_energy_a, fa, fb, bvec, xk, &
+  subroutine sfrowcal(wmo, target_energy, mo_energy_a, mo_energy_b, fa, fb, bvec, xk, &
                       xhxa, xhxb, hppija, hppijb, noca, nocb)
     use precision, only: dp
 
@@ -760,6 +793,7 @@ contains
     real(kind=dp), intent(out), dimension(:,:) :: wmo
     real(kind=dp), intent(in) :: target_energy
     real(kind=dp), intent(in), dimension(:) :: mo_energy_a
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_b
     real(kind=dp), intent(in), dimension(:,:) :: fa, fb
     real(kind=dp), intent(in), dimension(:) :: bvec
     real(kind=dp), intent(in), dimension(:) :: xk
@@ -819,14 +853,20 @@ contains
       end do
     end do
 
-    wmo(1:nocb,lr1:lr2) = wrk(1:nocb,1:2)*0.5_dp &
-                        + xhxa(1:nocb,lr1:lr2) &
-                        + xhxb(1:nocb,lr1:lr2) &
-                        + hppija(1:nocb,lr1:lr2)
+    ! Note: GAMESS W_IA_B has: XHXB + EB*ZB (using BETA orbital energies!)
+    ! No wrk term (Fock-based), no XHXA, no HPPIJA
+    wmo(1:nocb,lr1:lr2) = xhxb(1:nocb,lr1:lr2)
     wmo(1:nocb,lr1) = wmo(1:nocb,lr1) &
-                    + mo_energy_a(1:nocb)*wrk1(1:nocb,lr1)
+                    + mo_energy_b(1:nocb)*wrk1(1:nocb,lr1)
     wmo(1:nocb,lr2) = wmo(1:nocb,lr2) &
-                    + mo_energy_a(1:nocb)*wrk1(1:nocb,lr2)
+                    + mo_energy_b(1:nocb)*wrk1(1:nocb,lr2)
+    ! DEBUG: W_ix block (beta-occ to singly-occ)
+    write(*,'("[SFROWCAL] xhxb(1:4,5:6) norm=",ES12.4)') sqrt(sum(xhxb(1:nocb,lr1:lr2)**2))
+    write(*,'("[SFROWCAL] mo_e_b*wrk1 contribution=",ES12.4)') &
+          sqrt(sum((mo_energy_b(1:nocb)*wrk1(1:nocb,lr1))**2) + &
+               sum((mo_energy_b(1:nocb)*wrk1(1:nocb,lr2))**2))
+    write(*,'("[SFROWCAL] W_ix(1:nocb,lr1:lr2) norm=",ES12.4)') &
+          sqrt(sum(wmo(1:nocb,lr1:lr2)**2))
 
 !   ----- W_IA -----
     wrk = 0.0_dp
@@ -844,6 +884,9 @@ contains
       wmo(1:nocb,a) = wmo(1:nocb,a) &
                     + mo_energy_a(1:nocb)*wrk1(1:nocb,a)
     end do
+    ! DEBUG: W_IA block (beta-occ to alpha-virt)
+    write(*,'("[SFROWCAL] W_IA(1:nocb,noca+1:nbf) norm=",ES12.4)') &
+          sqrt(sum(wmo(1:nocb,noca+1:nbf)**2))
 
 !   ----- W_XA -----
     wrk = 0.0_dp
@@ -868,6 +911,9 @@ contains
       wmo(lr1:lr2,a) = wmo(lr1:lr2,a) &
                      + mo_energy_a(lr1:lr2)*wrk1(lr1:lr2,a)
     end do
+    ! DEBUG: W_XA block (singly-occ to alpha-virt)
+    write(*,'("[SFROWCAL] W_XA(lr1:lr2,noca+1:nbf) norm=",ES12.4)') &
+          sqrt(sum(wmo(lr1:lr2,noca+1:nbf)**2))
 
 !   Alpha intermediate
     wrk = - fb
@@ -886,6 +932,10 @@ contains
                         bvec, noca, &
                0.0_dp, wrk1, nbf)
 
+    ! DEBUG: Alpha intermediate (like W_IJ from V*V terms)
+    write(*,'("[SFROWCAL] alpha_intermediate wrk1(1:noca,1:noca) norm=",ES12.4)') &
+          sqrt(sum(wrk1(1:noca,1:noca)**2))
+
 !   beta intermediate
     wrk = fa
     do i = 1, noca
@@ -902,12 +952,19 @@ contains
                        wrk2, noca, &
                0.0_dp, wrk, nbf)
 
+    ! DEBUG: Beta intermediate (like W_AB from V*V terms)
+    write(*,'("[SFROWCAL] beta_intermediate wrk(1:nvirb,1:nvirb) norm=",ES12.4)') &
+          sqrt(sum(wrk(1:nbf-nocb,1:nbf-nocb)**2))
+
   ! W_ij
     do i = 1, nocb
       do j = 1, i
         wmo(i,j) = hppija(i,j)+hppijb(i,j)+wrk1(i,j)
       end do
     end do
+    ! DEBUG: W_ij block (beta-occ to beta-occ)
+    write(*,'("[SFROWCAL] W_ij(1:nocb,1:nocb) norm=",ES12.4)') &
+          sqrt(sum(wmo(1:nocb,1:nocb)**2))
 
   ! W_xy
     do x = nocb+1, noca
@@ -915,6 +972,9 @@ contains
         wmo(x,y) = hppija(x,y)+wrk1(x,y)+wrk(x-nocb,y-nocb)
       end do
     end do
+    ! DEBUG: W_xy block (singly-occ to singly-occ)
+    write(*,'("[SFROWCAL] W_xy(nocb+1:noca,nocb+1:noca) norm=",ES12.4)') &
+          sqrt(sum(wmo(nocb+1:noca,nocb+1:noca)**2))
 
   ! W_ab
     do a = noca+1, nbf
@@ -922,6 +982,9 @@ contains
         wmo(a,b) = wrk(a-nocb,b-nocb)
       end do
     end do
+    ! DEBUG: W_ab block (alpha-virt to alpha-virt)
+    write(*,'("[SFROWCAL] W_ab(noca+1:nbf,noca+1:nbf) norm=",ES12.4)') &
+          sqrt(sum(wmo(noca+1:nbf,noca+1:nbf)**2))
 
   ! Scale diagonal elements
     do i = 1, nbf
@@ -929,9 +992,160 @@ contains
     end do
 
     wmo = -wmo
+    ! DEBUG: Final W matrix
+    write(*,'("[SFROWCAL] FINAL wmo norm=",ES12.4)') sqrt(sum(wmo**2))
     deallocate(wrk, wrk1, wrk2)
 
   end subroutine sfrowcal
+
+!> @brief UHF Spin-Flip W matrix calculation (separate alpha/beta)
+!> @details Builds separate WA and WB matrices following GAMESS SFWCALC structure.
+!>          WA is transformed with alpha MO coefficients, WB with beta.
+!>
+!> WA (alpha space, nbf x nbf):
+!>   W_IJ_A(1:noca, 1:noca) = 2*(EE-EB(k))*V*V + HPPIJA
+!>   W_IA_A(1:noca, noca+1:nbf) = EA(I)*ZA
+!>   W_AB_A = 0
+!>
+!> WB (beta space, nbf x nbf):
+!>   W_IJ_B(1:nocb, 1:nocb) = HPPIJB
+!>   W_IA_B(1:nocb, nocb+1:nbf) = XHXB + EB(I)*ZB
+!>   W_AB_B(nocb+1:nbf, nocb+1:nbf) = 2*(EE+EA(k))*V*V
+  subroutine umrsfrowcal(wmo_a, wmo_b, target_energy, mo_energy_a, mo_energy_b, &
+                         fa, fb, bvec, xk, xhxb, hppija, hppijb, noca, nocb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: wmo_a, wmo_b
+    real(kind=dp), intent(in) :: target_energy
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_a
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_b
+    real(kind=dp), intent(in), dimension(:,:) :: fa, fb
+    real(kind=dp), intent(in), dimension(:) :: bvec
+    real(kind=dp), intent(in), dimension(:) :: xk
+    real(kind=dp), intent(in), dimension(:,:) :: xhxb
+    real(kind=dp), intent(in), dimension(:,:) :: hppija, hppijb
+    integer, intent(in) :: noca, nocb
+
+    real(kind=dp), allocatable, dimension(:,:) :: wrk, wrk1, wrk2
+    real(kind=dp) :: dum, ee
+    integer :: i, j, k, a, ii, jj, ij, nbf, nvira, nvirb, iia
+
+    nbf = ubound(fa, 1)
+    nvira = nbf - noca  ! alpha virtuals
+    nvirb = nbf - nocb  ! beta virtuals
+    ee = target_energy
+
+    allocate(wrk(nbf,nbf), wrk1(nbf,nbf), wrk2(nbf,nbf), source=0.0_dp)
+
+    wmo_a = 0.0_dp
+    wmo_b = 0.0_dp
+
+    ! ===== Extract Z-vector components =====
+    ! xk has structure: [alpha Z (noca*nvira)] + [beta Z (nocb*nvirb)]
+    ! Alpha Z: ZA(i,a) for i=1:noca, a=noca+1:nbf
+    ! Beta Z:  ZB(i,a) for i=1:nocb, a=nocb+1:nbf
+
+    ! ===== W_IJ (occupied-occupied) =====
+
+    ! ALPHA W_IJ: 2*(EE-EB(k))*V*V + HPPIJA
+    ! where V is bvec(i,a) for i=1:noca, a=1:nvirb (alpha-occ to beta-virt transition)
+    ! EB(k) are beta orbital energies for virtual k
+    do i = 1, noca
+      do j = 1, i
+        dum = 0.0_dp
+        do k = nocb+1, nbf
+          ! V indices: (k-nocb-1)*noca + i, (k-nocb-1)*noca + j
+          ii = (k - nocb - 1)*noca + i
+          jj = (k - nocb - 1)*noca + j
+          if (ii >= 1 .and. ii <= size(bvec) .and. jj >= 1 .and. jj <= size(bvec)) then
+            dum = dum + (ee - mo_energy_b(k))*bvec(ii)*bvec(jj)
+          end if
+        end do
+        wmo_a(i,j) = dum + dum + hppija(i,j)
+      end do
+    end do
+    write(*,'("[UMRSFROWCAL] W_IJ_A(1:noca,1:noca) norm=",ES12.4)') &
+          sqrt(sum(wmo_a(1:noca,1:noca)**2))
+
+    ! BETA W_IJ: just HPPIJB
+    do i = 1, nocb
+      do j = 1, i
+        wmo_b(i,j) = hppijb(i,j)
+      end do
+    end do
+    write(*,'("[UMRSFROWCAL] W_IJ_B(1:nocb,1:nocb) norm=",ES12.4)') &
+          sqrt(sum(wmo_b(1:nocb,1:nocb)**2))
+
+    ! ===== W_AB (virtual-virtual) =====
+
+    ! ALPHA W_AB: zero (nothing to add)
+
+    ! BETA W_AB: 2*(EE+EA(k))*V*V
+    ! V indices: for beta virtual a,b and alpha occupied k
+    do i = nocb+1, nbf
+      ii = i - nocb
+      do j = nocb+1, i
+        jj = j - nocb
+        dum = 0.0_dp
+        do k = 1, noca
+          ! V(ii,k) = bvec((ii-1)*noca + k)
+          iia = (ii - 1)*noca + k
+          ij  = (jj - 1)*noca + k
+          if (iia >= 1 .and. iia <= size(bvec) .and. ij >= 1 .and. ij <= size(bvec)) then
+            dum = dum + (ee + mo_energy_a(k))*bvec(iia)*bvec(ij)
+          end if
+        end do
+        wmo_b(i,j) = dum + dum
+      end do
+    end do
+    write(*,'("[UMRSFROWCAL] W_AB_B(nocb+1:nbf,nocb+1:nbf) norm=",ES12.4)') &
+          sqrt(sum(wmo_b(nocb+1:nbf,nocb+1:nbf)**2))
+
+    ! ===== W_IA (occupied-virtual) =====
+
+    ! ALPHA W_IA: EA(I)*ZA(I,A)
+    ! ZA is stored as xk(1:noca*nvira) in column-major order (A varies faster? or I?)
+    ! GAMESS: IIA = 0; DO J=NOCA+1,LX; DO I=1,NOCA; IIA=IIA+1; WA(I,J)=EA(I)*ZA(IIA)
+    ! So ZA is stored with I varying faster (for each A, iterate I)
+    iia = 0
+    do j = noca+1, nbf
+      do i = 1, noca
+        iia = iia + 1
+        wmo_a(i,j) = mo_energy_a(i)*xk(iia)
+      end do
+    end do
+    write(*,'("[UMRSFROWCAL] W_IA_A(1:noca,noca+1:nbf) norm=",ES12.4)') &
+          sqrt(sum(wmo_a(1:noca,noca+1:nbf)**2))
+
+    ! BETA W_IA: XHXB(I,J) + EB(I)*ZB(I,A)
+    ! ZB is stored as xk(noca*nvira+1 : end) with I varying faster
+    iia = noca * nvira  ! offset for beta Z
+    do j = nocb+1, nbf
+      do i = 1, nocb
+        iia = iia + 1
+        wmo_b(i,j) = xhxb(i,j) + mo_energy_b(i)*xk(iia)
+      end do
+    end do
+    write(*,'("[UMRSFROWCAL] W_IA_B(1:nocb,nocb+1:nbf) norm=",ES12.4)') &
+          sqrt(sum(wmo_b(1:nocb,nocb+1:nbf)**2))
+
+    ! ===== Scale diagonal and negate (like GAMESS) =====
+    do i = 1, nbf
+      wmo_a(i,i) = wmo_a(i,i)*0.5_dp
+      wmo_b(i,i) = wmo_b(i,i)*0.5_dp
+    end do
+
+    wmo_a = -wmo_a
+    wmo_b = -wmo_b
+
+    write(*,'("[UMRSFROWCAL] FINAL wmo_a norm=",ES12.4)') sqrt(sum(wmo_a**2))
+    write(*,'("[UMRSFROWCAL] FINAL wmo_b norm=",ES12.4)') sqrt(sum(wmo_b**2))
+
+    deallocate(wrk, wrk1, wrk2)
+
+  end subroutine umrsfrowcal
 
   function get_spin_square(dmat_a,dmat_b,ta,tb,abxc,Smat,nocb,noca) result(s2)
   ! dmat_a / dmat_b -- alpha/beta density of the excited state
@@ -1101,4 +1315,184 @@ contains
     end do
 
   end subroutine
+
+!>  @brief Compute RHS of Z-vector equation for UHF SF-TDDFT
+!>
+!>  This is for UNRESTRICTED HF reference (true UHF, not ROHF).
+!>  Different from sfrorhs which is for ROHF with doc/socc/virt blocks.
+!>
+!>  @param[out] rhs      RHS vector, dimension (nocca*nvira + noccb*nvirb)
+!>  @param[in]  hpta     H+[T] alpha part (nocca, nvira)
+!>  @param[in]  hptb     H+[T] beta part (noccb, nvirb)
+!>  @param[in]  xhxa     2*H[X]*X alpha (nbf, nocca)
+!>  @param[in]  xhxb     2*H[X]*X beta (nbf, nbf)
+!>  @param[in]  nocca    Number of alpha occupied orbitals
+!>  @param[in]  noccb    Number of beta occupied orbitals
+  subroutine sfrcalc(rhs, hpta, hptb, xhxa, xhxb, nocca, noccb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: rhs
+    real(kind=dp), intent(in), dimension(:,:) :: hpta   ! (nocca, nvira)
+    real(kind=dp), intent(in), dimension(:,:) :: hptb   ! (noccb, nvirb)
+    real(kind=dp), intent(in), dimension(:,:) :: xhxa   ! (nbf, nocca)
+    real(kind=dp), intent(in), dimension(:,:) :: xhxb   ! (nbf, nbf)
+    integer, intent(in) :: nocca, noccb
+
+    integer :: nbf, nvira, nvirb, nconfa, nconf
+    integer :: i, j, ij
+
+    nbf = ubound(xhxa, 1)
+    nvira = nbf - nocca
+    nvirb = nbf - noccb
+
+    write(*,'("DBG SFRCALC: nbf=",I3," nocca=",I3," noccb=",I3," nvira=",I3," nvirb=",I3)') &
+            nbf, nocca, noccb, nvira, nvirb
+    write(*,'("DBG SFRCALC: hpta shape=",2I4," hptb shape=",2I4)') &
+            size(hpta,1), size(hpta,2), size(hptb,1), size(hptb,2)
+    write(*,'("DBG SFRCALC: xhxa shape=",2I4," xhxb shape=",2I4)') &
+            size(xhxa,1), size(xhxa,2), size(xhxb,1), size(xhxb,2)
+    write(*,'("DBG SFRCALC: hpta norm=",ES12.4," hptb norm=",ES12.4)') &
+            sqrt(sum(hpta**2)), sqrt(sum(hptb**2))
+    write(*,'("DBG SFRCALC: xhxa norm=",ES12.4," xhxb norm=",ES12.4)') &
+            sqrt(sum(xhxa**2)), sqrt(sum(xhxb**2))
+
+    ! ----- ALPHA PART -----
+    ! R(i,a) = HPTA(i,a) + XHXA(a,i)
+    ij = 0
+    do j = nocca+1, nbf  ! a = virtual alpha
+      do i = 1, nocca     ! i = occupied alpha
+        ij = ij + 1
+        rhs(ij) = hpta(i, j-nocca) + xhxa(j, i)
+        if (ij <= 5) then
+          write(*,'("DBG SFRCALC ALPHA ij=",I3,": i=",I2," j=",I2," hpta(",I2,",",I2,")=",ES12.4," xhxa(",I2,",",I2,")=",ES12.4," rhs=",ES12.4)') &
+                  ij, i, j, i, j-nocca, hpta(i, j-nocca), j, i, xhxa(j, i), rhs(ij)
+        end if
+      end do
+    end do
+    nconfa = nocca * nvira
+    write(*,'("DBG SFRCALC: nconfa (alpha part size)=",I4)') nconfa
+
+    ! ----- BETA PART -----
+    ! R(i,a) = HPTB(i,a) - XHXB(i,a)
+    ij = 0
+    do j = noccb+1, nbf  ! a = virtual beta
+      do i = 1, noccb     ! i = occupied beta
+        ij = ij + 1
+        rhs(nconfa + ij) = hptb(i, j-noccb) - xhxb(i, j)
+        if (ij <= 5) then
+          write(*,'("DBG SFRCALC BETA ij=",I3,": i=",I2," j=",I2," hptb(",I2,",",I2,")=",ES12.4," xhxb(",I2,",",I2,")=",ES12.4," rhs=",ES12.4)') &
+                  ij, i, j, i, j-noccb, hptb(i, j-noccb), i, j, xhxb(i, j), rhs(nconfa + ij)
+        end if
+      end do
+    end do
+
+    write(*,'("DBG SFRCALC: rhs BEFORE sign flip (1:5)=",5ES12.4)') rhs(1:5)
+    write(*,'("DBG SFRCALC: rhs BEFORE sign flip (nconfa+1:nconfa+5)=",5ES12.4)') rhs(nconfa+1:nconfa+5)
+
+    ! ----- MULTIPLIED BY -1 I.E., RHS OF Z-VECTOR EQ. -----
+    nconf = nconfa + noccb * nvirb
+    rhs(1:nconf) = -rhs(1:nconf)
+
+    write(*,'("DBG SFRCALC: rhs AFTER sign flip (1:5)=",5ES12.4)') rhs(1:5)
+
+  end subroutine sfrcalc
+
+!>  @brief Compute preconditioner for UHF SF Z-vector
+!>
+!>  XM(i,a) = E(a) - E(i)  (orbital energy differences)
+!>
+!>  @param[out] xm       Preconditioner vector
+!>  @param[in]  e        Orbital energies
+!>  @param[in]  nocc     Number of occupied orbitals
+  subroutine xecalc(xm, e, nocc)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: xm
+    real(kind=dp), intent(in), dimension(:) :: e
+    integer, intent(in) :: nocc
+
+    integer :: nbf, i, j, ij
+
+    nbf = ubound(e, 1)
+
+    do j = nocc+1, nbf   ! virtual
+      do i = 1, nocc      ! occupied
+        ij = (j-nocc-1)*nocc + i
+        xm(ij) = e(j) - e(i)
+      end do
+    end do
+
+  end subroutine xecalc
+
+!>  @brief Add (E_a - E_i)*Z_ia to LHS for UHF SF Z-vector
+!>
+!>  This is similar to esum in tdhf_lib but works with 1D arrays
+!>  for the SF Z-vector iteration.
+!>
+!>  @param[inout] lhs     LHS vector (modified in place)
+!>  @param[in]    e       Orbital energies
+!>  @param[in]    z       Z-vector (pk in iteration)
+!>  @param[in]    nocc    Number of occupied orbitals
+  subroutine sfuesum(lhs, e, z, nocc)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:) :: lhs
+    real(kind=dp), intent(in), dimension(:) :: e
+    real(kind=dp), intent(in), dimension(:) :: z
+    integer, intent(in) :: nocc
+
+    integer :: nbf, i, j, ij
+
+    nbf = ubound(e, 1)
+
+    do j = nocc+1, nbf   ! virtual
+      do i = 1, nocc      ! occupied
+        ij = (j-nocc-1)*nocc + i
+        lhs(ij) = lhs(ij) + (e(j) - e(i)) * z(ij)
+      end do
+    end do
+
+  end subroutine sfuesum
+
+!>  @brief Unpack UHF Z-vector to MO matrix representation
+!>
+!>  For UHF, Z-vector has separate alpha and beta parts.
+!>  This unpacks from 1D vector to 2D MO matrix.
+!>  NOTE: Does NOT transform to AO - caller should do that separately.
+!>
+!>  @param[out]   zmo     MO matrix (nbf, nbf), zeros except (i,a) block
+!>  @param[in]    z       Z-vector in MO basis, dimension (nocc * nvir)
+!>  @param[in]    nocc    Number of occupied orbitals
+!>  @param[in]    nbf     Number of basis functions
+  subroutine sfugen(zmo, z, nocc, nbf)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: zmo
+    real(kind=dp), intent(in), dimension(:) :: z
+    integer, intent(in) :: nocc, nbf
+
+    integer :: i, a, ia
+
+    zmo = 0.0_dp
+
+    ! Convert Z(ia) -> Z_MO(i,a) where i=1:nocc, a=nocc+1:nbf
+    ! Z is packed as: Z(ia) = Z(i, a) with i running faster (column-major)
+    ia = 0
+    do a = nocc+1, nbf  ! virtual orbitals
+      do i = 1, nocc     ! occupied orbitals
+        ia = ia + 1
+        zmo(i, a) = z(ia)
+      end do
+    end do
+
+  end subroutine sfugen
+
 end module tdhf_sf_lib
