@@ -509,6 +509,7 @@ contains
     use oqp_tagarray_driver
 
     use types, only: information
+    use strings, only: Cstring, fstring
     use basis_tools, only: basis_set
     use messages, only: show_message, with_abort
     use util, only: measure_time
@@ -751,7 +752,7 @@ contains
 
     target_state = min(infos%tddft%target_state, infos%tddft%nstate)
     if (target_state /=infos%tddft%target_state) then
-      write(iw,'(/1x,66("-")&
+      write(*,'(/1x,66("-")&
                &/1x,"WARNING: Target state has been changed to the max available nstates"/&
                &/1x,66("-")/)')
     end if
@@ -781,7 +782,7 @@ contains
     call int2_driver%init(basis, infos)
     call int2_driver%set_screening()
 
-    write(iw,'(/1x,71("-")&
+    write(*,'(/1x,71("-")&
              &/19x,"MRSF-DFT ENERGY GRADIENT CALCULATION"&
              &/1x,71("-")/)')
 
@@ -804,7 +805,7 @@ contains
     ! Fock matrices A and B
     if( roref .or. uref )then
         wrk1t(1:nbf*nbf) => wrk1
-  !   Alapha
+  !   Alpha
       call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, wrk1)
       call unpack_matrix(wrk1t, fa)
 
@@ -1072,7 +1073,7 @@ contains
                       tab, tij, fa, fb, nocca, noccb)
     end if
 
-    write(iw,'(/3x,25("-")&
+    write(*,'(/3x,25("-")&
              &/6x,"START Z-VECTOR LOOP (",A,")"&
              &/3x,25("-")/)') trim(solver_name)
     call flush(iw)
@@ -1292,12 +1293,12 @@ contains
 ! -----------------------------------------------
     if (error>cnvtol) then
        infos%mol_energy%Z_Vector_converged=.false.
-       write(iw,'(/3x,24("-")&
+       write(*,'(/3x,24("-")&
              &/6x,"Z-Vector not converged"&
              &/3x,24("-")/)')
     else
        infos%mol_energy%Z_Vector_converged=.true.
-       write(iw,'(/3x,24("-")&
+       write(*,'(/3x,24("-")&
              &/6x,"Z-Vector converged"&
              &/3x,24("-")/)')
     endif

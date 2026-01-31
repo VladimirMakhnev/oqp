@@ -66,6 +66,10 @@ contains
     use util, only: measure_time
     use tdhf_lib, only: &
       iatogen, mntoia
+    use tdhf_sf_lib, only: &
+      sfrorhs, &
+      sfromcal, sfrogen, sfrolhs, &
+      pcgb, sfropcal, sfrowcal
     use dft, only: dft_initialize, dftclean
     use mathlib, only: symmetrize_matrix
     use mod_dft_molgrid, only: dft_grid_t
@@ -80,13 +84,16 @@ contains
     type(basis_set), pointer :: basis
     type(information), target, intent(inout) :: infos
 
+    integer :: s_size
+
     integer :: nbf, nbf_tri
+    logical :: roref = .false.
 
     type(dft_grid_t) :: molGrid
 
   ! General data
     logical :: dft
-    integer :: scf_type
+    integer :: scf_type, mol_mult
 
     real(kind=dp), allocatable :: p(:,:,:), v(:,:,:), d(:,:,:)
 
@@ -96,7 +103,16 @@ contains
     character(len=*), parameter :: tags_general(*) = (/ character(len=80) :: &
       OQP_DM_A, OQP_DM_B, OQP_td_abxc, OQP_td_p /)
 
+    mol_mult = infos%mol_prop%mult
+!    if (.not. (mol_mult == 3 .or. mol_mult == 4)) then
+!      call show_message( &
+!        'SF-TDDFT only supports mult=3 (triplet) or mult=4 (quartet) references', &
+!        with_abort)
+!    end if 
+
     scf_type = infos%control%scftype
+    if (scf_type==3) roref = .true.
+
     dft = infos%control%hamilton == 20
 
   ! Files open
@@ -123,6 +139,7 @@ contains
   ! Allocate H, S ,T and D matrices
     nbf = basis%nbf
     nbf_tri = nbf*(nbf+1)/2
+    s_size = (basis%nshell**2+basis%nshell)/2
 
 ! =============================================================================
 !   STEP 1: One-electron gradient
@@ -352,22 +369,22 @@ contains
 
     if(ok/=0) call show_message('cannot allocate memory', WITH_ABORT)
 
-    write(iw, '(/7x,"Fitting parameters")')
+    write(*, '(/7x,"Fitting parameters")')
     if (.not.infos%dft%cam_flag) then
-      write(iw, '(10x,"Exact HF exchange:")')
-      write(iw, '(5x,"Reference: |", t20, f6.3, t29, "|")') scale_exch
-      write(iw, '(5x,"Response:  |", t20, f6.3, t29, "|")') scale_exch2
+      write(*, '(10x,"Exact HF exchange:")')
+      write(*, '(5x,"Reference: |", t20, f6.3, t29, "|")') scale_exch
+      write(*, '(5x,"Response:  |", t20, f6.3, t29, "|")') scale_exch2
     else
-      write(iw, '(10x,"CAM parametres:")')
-      write(iw, '(16x,"|   alpha   |    beta   |     mu    |")')
-      write(iw, '(5x,"Reference: |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+      write(*, '(10x,"CAM parametres:")')
+      write(*, '(16x,"|   alpha   |    beta   |     mu    |")')
+      write(*, '(5x,"Reference: |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
          infos%dft%cam_alpha, infos%dft%cam_beta, infos%dft%cam_mu
-      write(iw, '(5x,"Response:  |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+      write(*, '(5x,"Response:  |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
          infos%tddft%cam_alpha, infos%tddft%cam_beta, infos%tddft%cam_mu
     end if
-    write(iw, '(10x,"Spin-pair coupling parametres:")')
-    write(iw, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
-    write(iw, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+    write(*, '(10x,"Spin-pair coupling parametres:")')
+    write(*, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
+    write(*, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
        infos%tddft%HFscale, infos%tddft%HFscale, infos%tddft%HFscale
 
     gcomp =  grd2_sf_compute_data_t( d2 = d &

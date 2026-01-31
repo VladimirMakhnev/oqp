@@ -51,6 +51,7 @@ contains
     use oqp_tagarray_driver
 
     use types, only: information
+    use strings, only: Cstring, fstring
     use basis_tools, only: basis_set
     use messages, only: show_message, with_abort
     use util, only: measure_time
@@ -93,6 +94,7 @@ contains
     integer :: nocca, nvira, noccb, nvirb
     integer :: nbf, nbf_tri
     integer :: iter
+    integer :: i, j, ij  ! loop indices for UHF block
     real(kind=dp) :: cnvtol, scale_exch, scale_exch2
     logical :: roref = .false.
     logical :: uhfref = .false.   ! True for pure UHF (not ROHF)
@@ -116,7 +118,7 @@ contains
     real(kind=dp) :: alpha, error
 
     logical :: dft
-    integer :: scf_type
+    integer :: scf_type, mol_mult
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: &
@@ -129,6 +131,8 @@ contains
     character(len=*), parameter :: tags_required(9) = (/ character(len=80) :: &
       OQP_FOCK_A, OQP_E_MO_A, OQP_E_MO_B, OQP_VEC_MO_A, OQP_FOCK_B, OQP_VEC_MO_B, OQP_td_bvec_mo, OQP_td_t, &
       OQP_td_energies /)
+
+    mol_mult = infos%mol_prop%mult
 
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
@@ -460,6 +464,7 @@ contains
             mu=infos%dft%cam_mu)
       ab1 => int2_data%apb(:,:,:,1)
 
+      !ab1 = ab1/2
       call symmetrize_matrix(pa(:,:,1), nbf)
       call symmetrize_matrix(pa(:,:,2), nbf)
       call utddft_fxc(basis=basis, &
@@ -472,6 +477,7 @@ contains
              dxa=pa(:,:,1:1), &
              dxb=pa(:,:,2:2), &
              nmtx=1, &
+             !threshold=1.0d-15, &
              threshold=0.0d0, &
              infos=infos)
 
