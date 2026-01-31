@@ -118,7 +118,11 @@ contains
   ! Files open
     open (unit=IW, file=infos%log_filename, position="append")
   !
-    call print_module_info('SF_Grad','Computing Gradient of SF-TDDFT')
+    if (roref) then
+      call print_module_info('SF_Grad','Computing Gradient of SF-TDDFT (ROHF ref)')
+    else
+      call print_module_info('SF_Grad','Computing Gradient of SF-TDDFT (UHF ref)')
+    end if
 !
     write(iw,'(/5X,"Gradient options"/&
                 &5X,18("-")/&

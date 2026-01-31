@@ -142,7 +142,11 @@ contains
 
   ! Files open
     open (unit=IW, file=infos%log_filename, position="append")
-    call print_module_info('SF_TDHF_Z_Vector','Solving Z-Vector for SF-TDDFT')
+    if (uhfref) then
+      call print_module_info('SF_TDHF_Z_Vector','Solving Z-Vector for SF-TDDFT (UHF ref)')
+    else
+      call print_module_info('SF_TDHF_Z_Vector','Solving Z-Vector for SF-TDDFT (ROHF ref)')
+    end if
 
   ! Load basis set
     basis => infos%basis

@@ -139,7 +139,11 @@ contains
   ! 3. LOG: Write: Main output file
     open (unit=IW, file=infos%log_filename, position="append")
   !
-    call print_module_info('SF_TDHF_Energy','Computing Energy of SF-TDDFT')
+    if (uhfref) then
+      call print_module_info('SF_TDHF_Energy','Computing Energy of SF-TDDFT (UHF ref)')
+    else
+      call print_module_info('SF_TDHF_Energy','Computing Energy of SF-TDDFT (ROHF ref)')
+    end if
   ! Readings
 
   ! Load basis set
