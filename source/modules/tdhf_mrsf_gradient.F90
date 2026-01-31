@@ -64,7 +64,6 @@ contains
     use oqp_tagarray_driver
 
     use types, only: information
-    use strings, only: Cstring, fstring
     use basis_tools, only: basis_set
     use messages, only: show_message, with_abort
 
@@ -84,14 +83,10 @@ contains
     type(basis_set), pointer :: basis
     type(information), target, intent(inout) :: infos
 
-    integer :: s_size
-
     integer :: arr_size
 
     integer :: nbf, nbf2
     integer :: mrst
-    logical :: roref = .false.
-    logical :: uref = .false.
     logical :: umrsf
 
     type(dft_grid_t) :: molGrid
@@ -115,9 +110,6 @@ contains
             &with ONLY triplet multiplicity(mult=3)', with_abort)
 
     scf_type = infos%control%scftype
-    if (scf_type==3) roref = .true.
-    if (scf_type==2) uref = .true.
-
     umrsf = infos%tddft%umrsf
 
     if (umrsf) then
@@ -153,7 +145,6 @@ contains
   ! Allocate H, S ,T and D matrices
     nbf = basis%nbf
     nbf2 = nbf*(nbf+1)/2
-    s_size = (basis%nshell**2+basis%nshell)/2
 
 !   Compute 1e gradient
     call flush(iw)
@@ -202,7 +193,6 @@ contains
            pa=p(:,:,1:1), &
            pb=p(:,:,2:2), &
            nmtx=1, &
-           !threshold=1.0d-15, &
            threshold=0.0d0, &
            infos=infos)
 
@@ -232,6 +222,7 @@ contains
 !> @brief The driver for the two electron gradient
   subroutine mrsf_2e_grad(basis, infos, d, p, spc, v)
 
+    use io_constants, only: iw
     use basis_tools, only: basis_set
     use precision, only: dp
     use messages, only: show_message, WITH_ABORT
@@ -268,23 +259,24 @@ contains
 
     if(ok/=0) call show_message('cannot allocate memory', WITH_ABORT)
 
-    write(*, '(/7x,"Fitting parameters for MRSF-TDDFT")')
+    write(iw, '(/7x,"Fitting parameters for MRSF-TDDFT")')
     if (.not.infos%dft%cam_flag) then
-      write(*, '(10x,"Exact HF exchange:")')
-      write(*, '(5x,"Reference: |", t20, f6.3, t29, "|")') scale_exch
-      write(*, '(5x,"Response:  |", t20, f6.3, t29, "|")') scale_exch2
+      write(iw, '(10x,"Exact HF exchange:")')
+      write(iw, '(5x,"Reference: |", t20, f6.3, t29, "|")') scale_exch
+      write(iw, '(5x,"Response:  |", t20, f6.3, t29, "|")') scale_exch2
     else
-      write(*, '(10x,"CAM parametres:")')
-      write(*, '(16x,"|   alpha   |    beta   |     mu    |")')
-      write(*, '(5x,"Reference: |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+      write(iw, '(10x,"CAM parametres:")')
+      write(iw, '(16x,"|   alpha   |    beta   |     mu    |")')
+      write(iw, '(5x,"Reference: |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
          infos%dft%cam_alpha, infos%dft%cam_beta, infos%dft%cam_mu
-      write(*, '(5x,"Response:  |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+      write(iw, '(5x,"Response:  |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
          infos%tddft%cam_alpha, infos%tddft%cam_beta, infos%tddft%cam_mu
     end if
-    write(*, '(10x,"Spin-pair coupling parametres:")')
-    write(*, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
-    write(*, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+    write(iw, '(10x,"Spin-pair coupling parametres:")')
+    write(iw, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
+    write(iw, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
        infos%tddft%spc_coco, infos%tddft%spc_ovov, infos%tddft%spc_coov
+
     if (umrsf) then
      gcomp = grd2_umrsf_compute_data_t( d2 = d &
                                       , p2 = p &
@@ -384,6 +376,7 @@ contains
     coulfact = 4*this%coulscale
     xcfact = this%hfscale
     xcfact2 = this%hfscale2
+    ! SPC scaling factor (net scaling = 1.0)
     qfspcp1 = this%spcscale(1)
     qfspcp2 = this%spcscale(2)
     qfspcp3 = this%spcscale(3)
@@ -611,6 +604,7 @@ contains
     coulfact = 4*this%coulscale
     xcfact = this%hfscale
     xcfact2 = this%hfscale2
+    ! SPC scaling factors (net scaling = 1.0)
     qfspcp1 = this%spcscale(1)
     qfspcp2 = this%spcscale(2)
     qfspcp3 = this%spcscale(3)

@@ -460,7 +460,7 @@ contains
           infos = infos)
     end if
 
-    ! Transform to MO basis - Fixed to use correct mo_b for beta
+    ! Transform to MO basis using mo_b for beta
     call mntoia(ab1(:,:,1), gmres_ab1_mo_a, mo_a, mo_a, nocca, nocca)
     call mntoia(ab1(:,:,2), gmres_ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
@@ -509,7 +509,6 @@ contains
     use oqp_tagarray_driver
 
     use types, only: information
-    use strings, only: Cstring, fstring
     use basis_tools, only: basis_set
     use messages, only: show_message, with_abort
     use util, only: measure_time
@@ -752,7 +751,7 @@ contains
 
     target_state = min(infos%tddft%target_state, infos%tddft%nstate)
     if (target_state /=infos%tddft%target_state) then
-      write(*,'(/1x,66("-")&
+      write(iw,'(/1x,66("-")&
                &/1x,"WARNING: Target state has been changed to the max available nstates"/&
                &/1x,66("-")/)')
     end if
@@ -782,7 +781,7 @@ contains
     call int2_driver%init(basis, infos)
     call int2_driver%set_screening()
 
-    write(*,'(/1x,71("-")&
+    write(iw,'(/1x,71("-")&
              &/19x,"MRSF-DFT ENERGY GRADIENT CALCULATION"&
              &/1x,71("-")/)')
 
@@ -1073,7 +1072,7 @@ contains
                       tab, tij, fa, fb, nocca, noccb)
     end if
 
-    write(*,'(/3x,25("-")&
+    write(iw,'(/3x,25("-")&
              &/6x,"START Z-VECTOR LOOP (",A,")"&
              &/3x,25("-")/)') trim(solver_name)
     call flush(iw)
@@ -1293,12 +1292,12 @@ contains
 ! -----------------------------------------------
     if (error>cnvtol) then
        infos%mol_energy%Z_Vector_converged=.false.
-       write(*,'(/3x,24("-")&
+       write(iw,'(/3x,24("-")&
              &/6x,"Z-Vector not converged"&
              &/3x,24("-")/)')
     else
        infos%mol_energy%Z_Vector_converged=.true.
-       write(*,'(/3x,24("-")&
+       write(iw,'(/3x,24("-")&
              &/6x,"Z-Vector converged"&
              &/3x,24("-")/)')
     endif
