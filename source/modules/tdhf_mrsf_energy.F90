@@ -177,7 +177,7 @@ contains
 
     infos%tddft%nstate = nstates
 
-    nvec = min(max(nstates,6), mxvec)
+    nvec = min(max(2*nstates, 20), mxvec)
 
     call infos%dat%remove_records(tags_alloc)
 
