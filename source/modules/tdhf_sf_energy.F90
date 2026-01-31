@@ -222,8 +222,14 @@ contains
     if (ok /= 0) call show_message('Cannot allocate memory', WITH_ABORT)
 
     scale_exch = 1.0_dp
-    if (infos%tddft%HFscale == -1.0_dp) &
-          infos%tddft%HFscale = infos%dft%HFscale
+    if (infos%tddft%HFscale == -1.0_dp) then
+      if (infos%dft%HFscale >= 0.0_dp) then
+        infos%tddft%HFscale = infos%dft%HFscale
+      else
+        ! Pure HF: full exact exchange
+        infos%tddft%HFscale = 1.0_dp
+      end if
+    end if
 
     if (infos%dft%cam_flag) then
       if (infos%tddft%cam_alpha == -1.0_dp) &

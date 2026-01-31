@@ -1419,11 +1419,17 @@ contains
 
         wao = wao*0.125_dp
     else
+        ! Transform W from MO to AO basis
+        ! Alpha contribution
         call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
         call symmetrize_matrix(wrk2, nbf)
-        call pack_matrix(wrk2, wao)
+        ! Beta contribution (same W_MO but different MO coefficients)
+        call orthogonal_transform('t', nbf, mo_b, wmo, wrk3, wrk1)
+        call symmetrize_matrix(wrk3, nbf)
+        ! Sum alpha + beta contributions
+        call pack_matrix(wrk2+wrk3, wao)
+        ! Scale factor for ROHF: 0.5 * 0.5 = 0.25
         wao = wao*0.5_dp
-    !   ROHF, half one more time:
         wao = wao*0.5_dp
 
     endif
