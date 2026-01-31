@@ -49,16 +49,6 @@ contains
     call tdhf_mrsf_gradient(inf)
   end subroutine tdhf_mrsf_gradient_c
 
-  subroutine tdhf_umrsf_gradient_C(c_handle) bind(C, name="tdhf_umrsf_gradient")
-    use c_interop, only: oqp_handle_t, oqp_handle_get_info
-    use types, only: information
-    type(oqp_handle_t) :: c_handle
-    type(information), pointer :: inf
-    inf => oqp_handle_get_info(c_handle)
-    inf%tddft%umrsf = .true.
-    call tdhf_mrsf_gradient(inf)
-  end subroutine tdhf_umrsf_gradient_c
-
   subroutine tdhf_mrsf_gradient(infos)
     use io_constants, only: iw
     use oqp_tagarray_driver
@@ -92,7 +82,6 @@ contains
     integer :: mrst
     logical :: roref = .false.
     logical :: uref = .false.
-    logical :: umrsf
 
     type(dft_grid_t) :: molGrid
 
@@ -118,9 +107,7 @@ contains
     if (scf_type==3) roref = .true.
     if (scf_type==2) uref = .true.
 
-    umrsf = infos%tddft%umrsf
-
-    if (umrsf) then
+    if (uref) then
         arr_size = 11
     else
         arr_size = 7
@@ -131,10 +118,10 @@ contains
   ! Files open
     open (unit=iw, file=infos%log_filename, position="append")
   !
-  if (umrsf) then
-    call print_module_info('UMRSF_Grad','Computing Gradient of UMRSF-TDDFT')
+  if (uref) then
+    call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT (UHF reference)')
   else
-    call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT')
+    call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT (ROHF reference)')
   endif
 !
     write(iw,'(/5X,"Gradient options"/&
@@ -243,7 +230,7 @@ contains
     type(basis_set) :: basis
     real(kind=dp), contiguous, target :: p(:,:,:), d(:,:,:), spc(:,:,:), v(:,:)
 
-    logical :: urohf, dft, umrsf
+    logical :: urohf, dft, uref
     real(kind=dp) :: scale_exch  !> HF scale in Reference
     real(kind=dp) :: scale_exch2 !> HF scale in Response
 
@@ -253,7 +240,7 @@ contains
 
     dft = infos%control%hamilton == 20 ! dft or hf
     urohf = infos%control%scftype >= 2
-    umrsf = infos%tddft%umrsf
+    uref = infos%control%scftype == 2
 
     scale_exch = 1.0_dp
     scale_exch2 = 1.0_dp
@@ -285,7 +272,7 @@ contains
     write(*, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
     write(*, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
        infos%tddft%spc_coco, infos%tddft%spc_ovov, infos%tddft%spc_coov
-    if (umrsf) then
+    if (uref) then
      gcomp = grd2_umrsf_compute_data_t( d2 = d &
                                       , p2 = p &
                                       , spc2 = spc &

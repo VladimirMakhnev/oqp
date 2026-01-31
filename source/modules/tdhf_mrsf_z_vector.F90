@@ -493,16 +493,6 @@ contains
     call tdhf_mrsf_z_vector(inf)
   end subroutine tdhf_mrsf_z_vector_C
 
-  subroutine tdhf_umrsf_z_vector_C(c_handle) bind(C, name="tdhf_umrsf_z_vector")
-    use c_interop, only: oqp_handle_t, oqp_handle_get_info
-    use types, only: information
-    type(oqp_handle_t) :: c_handle
-    type(information), pointer :: inf
-    inf => oqp_handle_get_info(c_handle)
-    inf%tddft%umrsf = .true.
-    call tdhf_mrsf_z_vector(inf)
-  end subroutine tdhf_umrsf_z_vector_C
-
   subroutine tdhf_mrsf_z_vector(infos)
     use precision, only: dp
     use io_constants, only: iw
@@ -606,32 +596,27 @@ contains
       OQP_FOCK_A, OQP_E_MO_A, OQP_VEC_MO_A, OQP_FOCK_B, OQP_E_MO_B, OQP_VEC_MO_B, &
       OQP_td_bvec_mo, OQP_td_t, OQP_td_energies /)
 
-    logical :: umrsf
   ! variable of 2d dim of fmrst1
     integer :: size_fmrst1
 
     mol_mult = infos%mol_prop%mult
     if (mol_mult/=3) call show_message(&
-            'MRSF-TDDFT are available for ROHF/UHF ref.&
-            &with ONLY triplet multiplicity(mult=3)', with_abort)
+            'MRSF-TDDFT requires triplet multiplicity (mult=3)', with_abort)
 
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
-
     if (scf_type==2) uref = .true.
-
-    umrsf = infos%tddft%umrsf
 
     dft = infos%control%hamilton == 20
 
   ! Files open
   ! 3. LOG: Write: Main output file
     open (unit=iw, file=infos%log_filename, position="append")
-  !
-    if (umrsf) then
-        call print_module_info('UMRSF_TDHF_Z_Vector','Solving Z-Vector for UMRSF-TDDFT')
+
+    if (uref) then
+        call print_module_info('MRSF_TDHF_Z_Vector','Solving Z-Vector for MRSF-TDDFT (UHF ref)')
     else
-        call print_module_info('MRSF_TDHF_Z_Vector','Solving Z-Vector for MRSF-TDDFT')
+        call print_module_info('MRSF_TDHF_Z_Vector','Solving Z-Vector for MRSF-TDDFT (ROHF ref)')
     endif
 
   ! Readings
@@ -657,7 +642,7 @@ contains
     lzdim = noccb*(nsocc+nvira)+nsocc*nvira
 
   ! Def of size of fmrst1
-    if (umrsf) then
+    if (uref) then
         size_fmrst1 = 11
     else
         size_fmrst1 = 7
@@ -767,7 +752,7 @@ contains
     ! Save unrelaxed density matrices and the `b=A*x` vector for target state
     if (mrst==1 .or. mrst==3 ) then
       call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-      if (umrsf) then
+      if (uref) then
         call umrsfdmat(bvec_mo_d(:,1), td_abxc, mo_a, mo_b, ta, tb, nocca, noccb)
       else
         call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb)
@@ -826,7 +811,7 @@ contains
        scale_exch2 = infos%tddft%HFscale !> Response HF exchange
     end if
 
-    if (umrsf) then
+    if (uref) then
       if (mrst==1 .or. mrst==3 ) then
         int2_udata_st = int2_umrsf_data_t( &
             d3 = fmrst1, &
@@ -888,7 +873,7 @@ contains
         infos = infos)
 
 !   ALPHA: AO(M,N) -> MO(IA+)
-    if (umrsf) then
+    if (uref) then
        call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
 
        call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
@@ -901,13 +886,13 @@ contains
     if (mrst==1 .or. mrst==3) then
 
       call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
-      if (umrsf) then
+      if (uref) then
         call umrsfcbc(infos, mo_a, mo_b, wrk1, fmrst1(1,:,:,:))
       else
         call mrsfcbc(infos, mo_a, mo_a, wrk1, fmrst1(1,:,:,:))
       endif
 
-      if (umrsf) then
+      if (uref) then
         fmrst1(1,11,:,:) = td_abxc
         td_mrsf_den(1:11,:,:) = fmrst1(1,1:11,:,:)
       else
@@ -916,7 +901,7 @@ contains
       endif
 
       ! Initialize ERI calculations
-      if (umrsf) then
+      if (uref) then
         call int2_driver%run(int2_udata_st, &
               cam = dft.and.infos%dft%cam_flag, &
               alpha = infos%tddft%cam_alpha, &
@@ -935,21 +920,21 @@ contains
       endif
 
 !       call show_message('Can proceed futher?', with_abort)
-      if (umrsf) then
+      if (uref) then
         fmrst2 => int2_udata_st%f3(:,:,:,:,1)! ado2v a/b, ado1v a/b, adco1 a/b, adco2 a/b, ao21v, aco12, agdlr
       else
         fmrst2 => int2_data_st%f3(:,:,:,:,1)! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
       endif
 
     ! Scaling factor if triplet
-      if (umrsf) then
+      if (uref) then
         if (mrst==3) fmrst2(:,1:10,:,:) = -1.0_dp*fmrst2(:,1:10,:,:)
       else
         if (mrst==3) fmrst2(:,1:6,:,:) = -1.0_dp*fmrst2(:,1:6,:,:)
       endif
 
       ! Spin pair coupling
-      if (umrsf) then
+      if (uref) then
         if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
            fmrst2(:,10,:,:) = fmrst2(:,10,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
         if (infos%tddft%spc_ovov /= infos%tddft%hfscale) &
@@ -998,7 +983,7 @@ contains
       endif
    ! spin pair ov-ov, co-co, co-ov coupling
 
-      if (umrsf) then
+      if (uref) then
         call umrsfsp(hxa, hxb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), nocca, noccb)
       else
         call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
@@ -1029,7 +1014,7 @@ contains
             beta=infos%tddft%cam_beta,&
             mu=infos%tddft%cam_mu)
 
-      if (umrsf) then
+      if (uref) then
         call orthogonal_transform('n', nbf, mo_a, int2_data_q%amb(:,:,1,1), wrk2, wrk1)
         call iatogen(bvec_mo(:,target_state),wrk3,noccb,nocca)
 
@@ -1078,7 +1063,7 @@ contains
              &/3x,25("-")/)') trim(solver_name)
     call flush(iw)
 
-    if (umrsf) then
+    if (uref) then
        call umrsfromcal(xm, xminv, mo_energy_a, mo_energy_b, fa, fb, nocca, noccb)
     else
        call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
@@ -1189,7 +1174,7 @@ contains
 
       !   ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
 
-      if (umrsf) then
+      if (uref) then
           call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
           wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
           call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
@@ -1199,7 +1184,7 @@ contains
           call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
       endif
 
-      if (umrsf) then
+      if (uref) then
           call umrsfrolhs(lhs, xk, mo_energy_a, mo_energy_b, fa, fb, ab1_mo_a, ab1_mo_b, &
                        nocca, noccb)
       else
@@ -1257,7 +1242,7 @@ contains
             infos = infos)
 
         !     ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
-        if (umrsf) then
+        if (uref) then
          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
 
          call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
@@ -1381,7 +1366,7 @@ contains
     wmo = 0
     if (mrst==1 .or. mrst==3) then
 
-      if (umrsf) then
+      if (uref) then
 !        call umrsfrowcal(wmo, mo_energy_a, mo_energy_a, fa, fb, xk, &
 !                        hxa, hxb, ppija, ppijb, &
 !                        nocca, noccb)
@@ -1415,7 +1400,7 @@ contains
 
     end if
 
-    if (umrsf) then
+    if (uref) then
 
         wao = wao*0.125_dp
     else

@@ -144,6 +144,7 @@ module types
     integer(c_int64_t)     :: trh_nmic = 50         !< Max micro-iterations per macro step
     real(c_double)         :: trh_gred = 1.0d-3     !< Global trust-radius reduction factor (0<gred<1)
     real(c_double)         :: trh_lred = 1.0d-4     !< Local trust-radius reduction factor (0<lred<1)
+    logical(c_bool)        :: jacobi_rotation = .false.  !< Jacobi MO rotation after SCF for UHF
   end type control_parameters
 
   type, public, bind(c) :: tddft_parameters
@@ -169,8 +170,7 @@ module types
     type(c_ptr) :: ixcore                  !< orbital index responsible for excitation (ixcore=1 means that it computes 
     integer(c_int64_t) :: ixcore_len = 0   !< length of ixcore
     integer(c_int64_t) :: z_solver = 0     !< z-vector solver: 0 (CG), 1 (GMRES)
-    integer(c_int64_t) :: gmres_dim = 50   !< The Restart dimension of GMRES 
-    logical(c_bool) :: umrsf= .False.      !< UMRSF branch calculations switch in td_mrsf_energy module
+    integer(c_int64_t) :: gmres_dim = 50   !< The Restart dimension of GMRES
   end type tddft_parameters
 
   type, public, bind(c) :: mpi_communicator

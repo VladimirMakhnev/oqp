@@ -57,7 +57,7 @@ contains
     use util, only: measure_time, e_charge_repulsion
     use printing, only: print_mo_range
     use mathlib, only: traceprod_sym_packed, matrix_invsqrt
-    use mathlib, only: unpack_matrix
+    use mathlib, only: unpack_matrix, jacobi_rotate_mo
     use io_constants, only: IW
     use basis_tools, only: basis_set
     use scf_converger, only: scf_conv_result, scf_conv, &
@@ -1027,8 +1027,17 @@ contains
       dmat_b = pdmat(:,2)
       mo_b = mo_a
       mo_energy_b = mo_energy_a
-      
+
     end select
+
+    !----------------------------------------------------------------------------
+    ! Jacobi MO Rotation (for UHF reference with MRSF)
+    !----------------------------------------------------------------------------
+    if (infos%control%jacobi_rotation .and. scf_type == scf_uhf) then
+      call jacobi_rotate_mo(mo_a, mo_b, smat_full, nelec_a, nbf, work1, work2, &
+                            infos%tddft%debug_mode)
+    endif
+
     !----------------------------------------------------------------------------
     ! Print Molecular Orbitals
     !----------------------------------------------------------------------------
