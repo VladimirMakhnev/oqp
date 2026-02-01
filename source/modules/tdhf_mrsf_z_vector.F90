@@ -76,7 +76,8 @@ contains
   subroutine gmres_solve(apply_operator, apply_precond, b, x, n, restart, max_iter, tol, &
                          infos, basis, molGrid, int2_driver, &
                          nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
-                         fa, fb, scale_exch, dft, error_out, iter_out, iw)
+                         fa, fb, scale_exch, dft, error_out, iter_out, iw, &
+                         uref, mo_energy_b)
     use precision, only: dp
     use types, only: information
     use basis_tools, only: basis_set
@@ -88,7 +89,7 @@ contains
     interface
       subroutine apply_operator(x_in, x_out, infos, basis, molGrid, int2_driver, &
                                nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
-                               fa, fb, scale_exch, dft)
+                               fa, fb, scale_exch, dft, uref, mo_energy_b)
         use precision, only: dp
         use types, only: information
         use basis_tools, only: basis_set
@@ -104,6 +105,8 @@ contains
         real(kind=dp), intent(in) :: mo_a(:,:), mo_b(:,:), mo_energy_a(:)
         real(kind=dp), intent(in) :: fa(:,:), fb(:,:), scale_exch
         logical, intent(in) :: dft
+        logical, intent(in) :: uref
+        real(kind=dp), intent(in) :: mo_energy_b(:)
       end subroutine
 
       subroutine apply_precond(x_in, x_out)
@@ -127,6 +130,8 @@ contains
     logical, intent(in) :: dft
     real(kind=dp), intent(out) :: error_out
     integer, intent(out) :: iter_out
+    logical, intent(in) :: uref
+    real(kind=dp), intent(in) :: mo_energy_b(:)
 
     ! Local variables
     real(kind=dp), allocatable :: V(:,:)     ! Krylov basis
@@ -173,7 +178,7 @@ contains
     ! Compute initial residual
     call apply_operator(x, Ax, infos, basis, molGrid, int2_driver, &
                        nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
-                       fa, fb, scale_exch, dft)
+                       fa, fb, scale_exch, dft, uref, mo_energy_b)
     r = b - Ax
     error_initial = sqrt(dot_product(r, r))
 
@@ -185,7 +190,7 @@ contains
       ! Compute initial residual r = b - A*x
       call apply_operator(x, Ax, infos, basis, molGrid, int2_driver, &
                          nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
-                         fa, fb, scale_exch, dft)
+                         fa, fb, scale_exch, dft, uref, mo_energy_b)
       r = b - Ax
 
       ! Apply preconditioner to residual
@@ -222,7 +227,7 @@ contains
         ! Apply operator to V_j
         call apply_operator(V(:,j), w, infos, basis, molGrid, int2_driver, &
                            nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
-                           fa, fb, scale_exch, dft)
+                           fa, fb, scale_exch, dft, uref, mo_energy_b)
 
         ! Apply preconditioner
         call apply_precond(w, V(:,j+1))
@@ -369,13 +374,13 @@ contains
   ! Apply the z-vector operator (A*x) - Modified to use module-level arrays
   subroutine apply_z_operator(x_in, x_out, infos, basis, molGrid, int2_driver, &
                               nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
-                              fa, fb, scale_exch, dft)
+                              fa, fb, scale_exch, dft, uref, mo_energy_b)
     use precision, only: dp
     use types, only: information
     use basis_tools, only: basis_set
     use int2_compute, only: int2_compute_t
     use tdhf_lib, only: int2_tdgrd_data_t
-    use tdhf_sf_lib, only: sfrogen, sfrolhs
+    use tdhf_sf_lib, only: sfrogen, sfrolhs, sfgen, sflhs
     use mod_dft_gridint_fxc, only: utddft_fxc
     use mathlib, only: symmetrize_matrix, orthogonal_transform
     use mod_dft_molgrid, only: dft_grid_t
@@ -393,14 +398,23 @@ contains
     real(kind=dp), intent(in) :: mo_a(:,:), mo_b(:,:), mo_energy_a(:)
     real(kind=dp), intent(in) :: fa(:,:), fb(:,:), scale_exch
     logical, intent(in) :: dft
+    logical, intent(in) :: uref
+    real(kind=dp), intent(in) :: mo_energy_b(:)
 
     ! Local variables
     real(kind=dp), pointer :: ab1(:,:,:)
     type(int2_tdgrd_data_t), allocatable, target :: int2_data
-    integer :: nvira, nvirb
+    integer :: nvira, nvirb, lzdim
 
     nvira = nbf - nocca
     nvirb = nbf - noccb
+
+    ! Calculate lzdim for proper indexing
+    if (uref) then
+      lzdim = nocca*nvira + noccb*nvirb
+    else
+      lzdim = noccb*((nocca-noccb)+nvira)+(nocca-noccb)*nvira
+    end if
 
     ! Ensure work arrays are initialized and have correct dimensions
     if (.not. gmres_work_allocated .or. &
@@ -419,7 +433,14 @@ contains
     gmres_ab1_mo_b = 0.0_dp
 
     ! Generate density matrices from x_in
-    call sfrogen(gmres_wrk1, gmres_wrk2, x_in, nocca, noccb)
+    if (uref) then
+      ! UHF: separate alpha and beta blocks
+      call sfgen(gmres_wrk1, x_in(1:nocca*nvira), nocca, nbf)
+      call sfgen(gmres_wrk2, x_in(nocca*nvira+1:lzdim), noccb, nbf)
+    else
+      ! ROHF: doc-socc-virt structure
+      call sfrogen(gmres_wrk1, gmres_wrk2, x_in, nocca, noccb)
+    end if
 
     ! Transform to AO basis
     call orthogonal_transform('t', nbf, mo_a, gmres_wrk1, gmres_pa(:,:,1), gmres_wrk3)
@@ -460,13 +481,18 @@ contains
           infos = infos)
     end if
 
-    ! Transform to MO basis using mo_b for beta
+    ! Transform to MO basis
     call mntoia(ab1(:,:,1), gmres_ab1_mo_a, mo_a, mo_a, nocca, nocca)
     call mntoia(ab1(:,:,2), gmres_ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
     ! Apply the operator
-    call sfrolhs(x_out, x_in, mo_energy_a, fa, fb, gmres_ab1_mo_a, gmres_ab1_mo_b, &
-                 nocca, noccb)
+    if (uref) then
+      call sflhs(x_out, x_in, mo_energy_a, mo_energy_b, gmres_ab1_mo_a, gmres_ab1_mo_b, &
+                 nocca, noccb, nvira, nvirb)
+    else
+      call sfrolhs(x_out, x_in, mo_energy_a, fa, fb, gmres_ab1_mo_a, gmres_ab1_mo_b, &
+                   nocca, noccb)
+    end if
 
     call int2_data%clean()
     deallocate(int2_data)
@@ -493,6 +519,46 @@ contains
     call tdhf_mrsf_z_vector(inf)
   end subroutine tdhf_mrsf_z_vector_C
 
+
+!> @brief Solve Z-vector equation for MRSF-TDDFT analytical gradients
+!>
+!> This subroutine solves the coupled-perturbed equation:
+!>
+!>   (A + B) * Z = -RHS
+!>
+!> for the orbital relaxation contribution to MRSF excited-state gradients.
+!>
+!> MRSF (Mixed-Reference Spin-Flip) extends SF-TDDFT by including:
+!> - Spin-pair coupling terms for proper spin eigenstates
+!> - CBC (Coulomb-B-Coulomb) density contributions
+!>
+!> Supported spin multiplicities (mrst):
+!>   mrst=1: Singlet states (alpha->beta excitations, spin-adapted)
+!>   mrst=3: Triplet states (alpha->beta excitations, spin-adapted)
+!>   mrst=5: Quintet states (beta->alpha excitations)
+!>
+!> Algorithm:
+!>   1. Build unrelaxed T density and MRSF-specific CBC densities
+!>   2. Compute H[T] and spin-pair coupling contributions to RHS
+!>   3. Initialize preconditioner M = diag(epsilon_a - epsilon_i)
+!>   4. Solve Z-vector equation using CG or GMRES solver
+!>   5. Build relaxed density P = T + Z
+!>   6. Compute energy-weighted density W for gradient
+!>
+!> Solver options:
+!>   z_solver=0: Preconditioned Conjugate Gradient (default)
+!>   z_solver=1: GMRES with restarts (for difficult convergence)
+!>
+!> Output:
+!>   - OQP_td_p: relaxed density matrices (alpha, beta)
+!>   - OQP_WAO: W matrix in AO basis for gradient
+!>   - OQP_td_mrsf_density: MRSF-specific density components
+!>
+!> Supports both UHF and ROHF references with appropriate function dispatch.
+!>
+!> Reference: Lee et al., JCTC 15, 4438 (2019) - MRSF-TDDFT
+!>            Shao, Head-Gordon, Krylov, JCP 118, 4807 (2003) - SF gradients
+!>
   subroutine tdhf_mrsf_z_vector(infos)
     use precision, only: dp
     use io_constants, only: iw
@@ -511,7 +577,9 @@ contains
     use tdhf_lib, only: iatogen, mntoia
     use tdhf_sf_lib, only: sfrorhs, &
       sfromcal, sfrogen, sfrolhs, pcgrbpini, &
-      pcgb, sfropcal, sfdmat
+      pcgb, sfropcal, sfdmat, &
+      ! UHF-specific functions (for UMRSF)
+      xecalc, sfgen, sflhs, sfpcal, sfwcal
     use dft, only: dft_initialize, dftclean
     use mod_dft_gridint_fxc, only: utddft_fxc
     use mathlib, only: symmetrize_matrix, orthogonal_transform, &
@@ -521,9 +589,7 @@ contains
 
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
-      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, &
-      umrsfdmat, umrsfsp, umrsfromcal, umrsfrolhs, &
-      umrsfrowcal
+      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, umrsfsp
     use oqp_linalg
     use printing, only: print_module_info
 
@@ -639,7 +705,15 @@ contains
     noccb = infos%mol_prop%nelec_B
     nvirb = nbf-noccb
     nsocc = nocca-noccb
-    lzdim = noccb*(nsocc+nvira)+nsocc*nvira
+
+    ! Z-vector dimension depends on reference type
+    if (uref) then
+      ! UHF: separate alpha and beta blocks
+      lzdim = nocca*nvira + noccb*nvirb
+    else
+      ! ROHF: doc-socc-virt structure
+      lzdim = noccb*(nsocc+nvira)+nsocc*nvira
+    end if
 
   ! Def of size of fmrst1
     if (uref) then
@@ -731,10 +805,6 @@ contains
     ta => td_t(:,1)
     tb => td_t(:,2)
 
-!111
-!222
-!333
-
     target_state = min(infos%tddft%target_state, infos%tddft%nstate)
     if (target_state /=infos%tddft%target_state) then
       write(*,'(/1x,66("-")&
@@ -749,11 +819,15 @@ contains
       solver_name = "CG"
     end if
 
-    ! Save unrelaxed density matrices and the `b=A*x` vector for target state
+! =============================================================================
+!   STEP 1: Build unrelaxed T density and transform X-vector for target state
+!   For Singlet/Triplet (mrst=1,3): alpha->beta excitations, use mrsfxvec
+!   For Quintet (mrst=5): beta->alpha excitations, direct use
+! =============================================================================
     if (mrst==1 .or. mrst==3 ) then
       call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
       if (uref) then
-        call umrsfdmat(bvec_mo_d(:,1), td_abxc, mo_a, mo_b, ta, tb, nocca, noccb)
+        call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb, mo_b)
       else
         call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb)
       endif
@@ -843,6 +917,10 @@ contains
       end if
     endif
 
+! =============================================================================
+!   STEP 2: Compute H[T] contribution to RHS
+!   H[T]_ia = sum_jb T_jb * <ij||ab> + XC contribution
+! =============================================================================
     int2_data = int2_tdgrd_data_t( &
         d2 = pa, &
         int_apb = .true., &
@@ -872,17 +950,15 @@ contains
         threshold = 1.0d-15, &
         infos = infos)
 
-!   ALPHA: AO(M,N) -> MO(IA+)
-    if (uref) then
-       call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+    ! Transform H[T] from AO to MO basis
+    call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+    call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
-       call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
-    else
-       call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-
-       call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
-    endif
-
+! =============================================================================
+!   STEP 3: Build MRSF-specific CBC densities and spin-pair coupling
+!   For Singlet/Triplet: CBC density from alpha->beta excitations
+!   For Quintet: uses beta->alpha structure
+! =============================================================================
     if (mrst==1 .or. mrst==3) then
 
       call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
@@ -919,7 +995,6 @@ contains
               mu = infos%tddft%cam_mu)
       endif
 
-!       call show_message('Can proceed futher?', with_abort)
       if (uref) then
         fmrst2 => int2_udata_st%f3(:,:,:,:,1)! ado2v a/b, ado1v a/b, adco1 a/b, adco2 a/b, ao21v, aco12, agdlr
       else
@@ -981,16 +1056,21 @@ contains
                    0.0_dp, hxb, nbf)
 
       endif
-   ! spin pair ov-ov, co-co, co-ov coupling
 
+! -----------------------------------------------------------------------------
+!   STEP 4: Spin-pair coupling contributions (MRSF-specific)
+!   Adds ov-ov, co-co, co-ov coupling terms for proper spin eigenstates
+! -----------------------------------------------------------------------------
       if (uref) then
         call umrsfsp(hxa, hxb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), nocca, noccb)
       else
         call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
       endif
 
-   !  Unrelaxed difference density matries T_ij and T_ab
-   !  Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
+! -----------------------------------------------------------------------------
+!   STEP 5: Build unrelaxed difference density matrices T_ij and T_ab
+!   T_ij = -X_ia*X_ja (occ-occ), T_ab = X_ia*X_ib (virt-virt)
+! -----------------------------------------------------------------------------
       call dgemm('n', 't', nocca, nocca, nvirb, &
                 -1.0_dp, bvec_mo_d, nocca, &
                          bvec_mo_d, nocca, &
@@ -1002,6 +1082,10 @@ contains
                          bvec_mo_d, nocca, &
                  0.0_dp, tab, nvirb)
 
+! -----------------------------------------------------------------------------
+!   STEP 6: Build Z-vector RHS for Singlet/Triplet states
+!   RHS includes Fock matrix, transition density, and spin-pair contributions
+! -----------------------------------------------------------------------------
       call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
                    Tij, Tab, Fa, Fb, nocca, noccb)
 
@@ -1054,21 +1138,37 @@ contains
                          bvec_mo(:,target_state), noccb, &
                  0.0_dp, tab, nvira)
 
+! -----------------------------------------------------------------------------
+!   STEP 6: Build Z-vector RHS for Quintet states (beta->alpha excitations)
+! -----------------------------------------------------------------------------
       call mrsfqrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
                       tab, tij, fa, fb, nocca, noccb)
     end if
 
+! -----------------------------------------------------------------------------
+!   STEP 7: Initialize preconditioner and solver
+!   UHF: orbital energy differences for alpha and beta blocks
+!   ROHF: combined doc-socc-virt structure via sfromcal
+! -----------------------------------------------------------------------------
     write(*,'(/3x,25("-")&
              &/6x,"START Z-VECTOR LOOP (",A,")"&
              &/3x,25("-")/)') trim(solver_name)
     call flush(iw)
 
     if (uref) then
-       call umrsfromcal(xm, xminv, mo_energy_a, mo_energy_b, fa, fb, nocca, noccb)
+       ! UHF: orbital energy differences for alpha and beta blocks separately
+       call xecalc(xm(1:nocca*nvira), mo_energy_a, nocca)
+       call xecalc(xm(nocca*nvira+1:lzdim), mo_energy_b, noccb)
+       xminv = 1.0_dp / xm
     else
        call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
     endif
 
+! -----------------------------------------------------------------------------
+!   STEP 8: Solve Z-vector equation (A+B)*Z = -RHS
+!   z_solver=0: Preconditioned Conjugate Gradient (default)
+!   z_solver=1: GMRES with restarts (for difficult convergence)
+! -----------------------------------------------------------------------------
     ! Choose solver based on input option (0=CG, 1=GMRES)
     if (infos%tddft%z_solver == 1) then
 
@@ -1112,7 +1212,9 @@ contains
           dft = dft, &
           error_out = error, &
           iter_out = gmres_iter, &
-          iw = iw)
+          iw = iw, &
+          uref = uref, &
+          mo_energy_b = mo_energy_b)
 
       write(iw,'(/," Final Summary:")')
       write(iw,'(" GMRES total iterations: ", I4)') gmres_iter
@@ -1132,7 +1234,14 @@ contains
       ! Initial guess with same strategy as CG
       xk = 0.0_dp
 
-      call sfrogen(wrk1, wrk2, xk, nocca, noccb)
+      if (uref) then
+        ! UHF: separate alpha and beta blocks
+        call sfgen(wrk1, xk(1:nocca*nvira), nocca, nbf)
+        call sfgen(wrk2, xk(nocca*nvira+1:lzdim), noccb, nbf)
+      else
+        ! ROHF: doc-socc-virt structure
+        call sfrogen(wrk1, wrk2, xk, nocca, noccb)
+      end if
       ! Alpha
       call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
       ! Beta
@@ -1173,20 +1282,13 @@ contains
           infos = infos)
 
       !   ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
+      call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+      wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
+      call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
       if (uref) then
-          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-          wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
-          call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
-      else
-          call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-          wrk1 = 2*ab1(:,:,2) + ab2(:,:,2)
-          call mntoia(wrk1, ab1_mo_b, mo_b, mo_b, noccb, noccb)
-      endif
-
-      if (uref) then
-          call umrsfrolhs(lhs, xk, mo_energy_a, mo_energy_b, fa, fb, ab1_mo_a, ab1_mo_b, &
-                       nocca, noccb)
+          call sflhs(lhs, xk, mo_energy_a, mo_energy_b, ab1_mo_a, ab1_mo_b, &
+                     nocca, noccb, nvira, nvirb)
       else
           call sfrolhs(lhs, xk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
                        nocca, noccb)
@@ -1201,7 +1303,14 @@ contains
 
       do iter = 1, infos%control%maxit_zv
 
-        call sfrogen(wrk1, wrk2, pk, nocca, noccb)
+        if (uref) then
+          ! UHF: separate alpha and beta blocks
+          call sfgen(wrk1, pk(1:nocca*nvira), nocca, nbf)
+          call sfgen(wrk2, pk(nocca*nvira+1:lzdim), noccb, nbf)
+        else
+          ! ROHF: doc-socc-virt structure
+          call sfrogen(wrk1, wrk2, pk, nocca, noccb)
+        end if
         !     Alpha
         call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
         !     Beta
@@ -1224,7 +1333,6 @@ contains
               mu=infos%dft%cam_mu)
         ab1 => int2_data%apb(:,:,:,1)
 
-        !ab1 = ab1/2
         call symmetrize_matrix(pa(:,:,1), nbf)
         call symmetrize_matrix(pa(:,:,2), nbf)
         call utddft_fxc( &
@@ -1242,16 +1350,13 @@ contains
             infos = infos)
 
         !     ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
+        call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+        call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+
         if (uref) then
-         call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-
-         call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
-         call umrsfrolhs(lhs, pk, mo_energy_a, mo_energy_b, fa, fb, &
-                         ab1_mo_a, ab1_mo_b, nocca, noccb)
+         call sflhs(lhs, pk, mo_energy_a, mo_energy_b, ab1_mo_a, ab1_mo_b, &
+                    nocca, noccb, nvira, nvirb)
         else
-         call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-
-         call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
          call sfrolhs(lhs, pk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
                       nocca, noccb)
         endif
@@ -1290,9 +1395,19 @@ contains
 
     call flush(iw)
 
+! -----------------------------------------------------------------------------
+!   STEP 9: Compute relaxed difference density P from Z-vector solution
+!   P_ij = T_ij + Z contributions, P_ab = T_ab + Z contributions
+!   mrst=1,3: Singlet/Triplet via sfpcal (UHF) or sfropcal (ROHF)
+!   mrst=5: Quintet via mrsfqropcal
+! -----------------------------------------------------------------------------
     if (mrst==1 .or. mrst==3) then
 
-      call sfropcal(wrk1, wrk2, tij, tab, xk, nocca, noccb)
+      if (uref) then
+        call sfpcal(wrk1, wrk2, tij, tab, xk, nocca, noccb, nvira, nvirb)
+      else
+        call sfropcal(wrk1, wrk2, tij, tab, xk, nocca, noccb)
+      end if
 
     else if (mrst==5) then
 
@@ -1300,6 +1415,10 @@ contains
 
     end if
 
+! -----------------------------------------------------------------------------
+!   STEP 10: Compute Fock response H[P] for relaxed density
+!   Transform P to AO basis, compute 2e integrals, transform back to MO
+! -----------------------------------------------------------------------------
  !  Update density for alpha
     call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
 
@@ -1361,49 +1480,50 @@ contains
                        wrk2,  nbf,  &
                0.0_dp, ppijb, noccb)
 
+! -----------------------------------------------------------------------------
+!   STEP 11: Build energy-weighted density matrix W for gradient
+!   W_ij = Z contributions with orbital energies and Fock matrices
+!   mrst=1,3: sfwcal (UHF) or mrsfrowcal (ROHF)
+!   mrst=5: mrsfqrowcal (Quintet)
+! -----------------------------------------------------------------------------
 !   Calculate W (in MO basis)
     wmo => wrk3
     wmo = 0
     if (mrst==1 .or. mrst==3) then
 
       if (uref) then
-!        call umrsfrowcal(wmo, mo_energy_a, mo_energy_a, fa, fb, xk, &
-!                        hxa, hxb, ppija, ppijb, &
-!                        nocca, noccb)
-        call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &
-                        hxa, hxb, ppija, ppijb, &
-                        nocca, noccb)
-        call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
-        call symmetrize_matrix(wrk2, nbf)
-!        call umrsfrowcal(wmo, mo_energy_b, mo_energy_b, fa, fb, xk, &
-!                        hxa, hxb, ppija, ppijb, &
-!                        nocca, noccb)
-        call mrsfrowcal(wmo, mo_energy_b, fa, fb, xk, &
-                        hxa, hxb, ppija, ppijb, &
-                        nocca, noccb)
-        call orthogonal_transform('t', nbf, mo_b, wmo, wrk3, wrk1)
-        call symmetrize_matrix(wrk3, nbf)
-        call pack_matrix(wrk2+wrk3, wao)
-!        call umrsfrowcal(wmo, mo_energy_a, mo_energy_b, fa, fb, xk, &
-!                        hxa, hxb, ppija, ppijb, &
-!                        nocca, noccb)
+        ! UHF: separate alpha and beta W matrices using SF UHF function
+        block
+          real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:), wao_a(:), wao_b(:)
+          allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
+          allocate(wao_a(nbf_tri), wao_b(nbf_tri), source=0.0_dp)
+
+          call sfwcal(wmo_a, wmo_b, mrsf_energies(target_state), &
+                      mo_energy_a, mo_energy_b, fa, fb, &
+                      bvec_mo_d(:,1), xk, hxb, ppija, ppijb, nocca, noccb)
+
+          ! Transform W_alpha: MO -> AO
+          call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
+          call symmetrize_matrix(wrk2, nbf)
+          wrk2 = wrk2 * 0.5_dp
+          call pack_matrix(wrk2, wao_a)
+
+          ! Transform W_beta: MO -> AO
+          call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
+          call symmetrize_matrix(wrk2, nbf)
+          wrk2 = wrk2 * 0.5_dp
+          call pack_matrix(wrk2, wao_b)
+
+          ! Total W in AO = W_alpha + W_beta
+          wao = wao_a + wao_b
+
+          deallocate(wmo_a, wmo_b, wao_a, wao_b)
+        end block
       else
+        ! ROHF: single W matrix using mrsfrowcal
         call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &
                         hxa, hxb, ppija, ppijb, &
                         nocca, noccb)
-      endif
-    else if (mrst==5) then
-
-      call mrsfqrowcal(wmo, mo_energy_a, fa, fb, xk, &
-                       hxa, hxb, ppija, ppijb, &
-                       nocca, noccb)
-
-    end if
-
-    if (uref) then
-
-        wao = wao*0.125_dp
-    else
         ! Transform W from MO to AO basis
         ! Alpha contribution
         call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
@@ -1416,8 +1536,22 @@ contains
         ! Scale factor for ROHF: 0.5 * 0.5 = 0.25
         wao = wao*0.5_dp
         wao = wao*0.5_dp
+      endif
+    else if (mrst==5) then
 
-    endif
+      call mrsfqrowcal(wmo, mo_energy_a, fa, fb, xk, &
+                       hxa, hxb, ppija, ppijb, &
+                       nocca, noccb)
+      ! Transform W from MO to AO basis for quintet
+      call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
+      call symmetrize_matrix(wrk2, nbf)
+      call orthogonal_transform('t', nbf, mo_b, wmo, wrk3, wrk1)
+      call symmetrize_matrix(wrk3, nbf)
+      call pack_matrix(wrk2+wrk3, wao)
+      wao = wao*0.5_dp
+      wao = wao*0.5_dp
+
+    end if
     call int2_driver%clean()
 
     if (dft) call dftclean(infos)
