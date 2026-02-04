@@ -292,6 +292,11 @@ contains
     call unpack_matrix(ta, pa(:,:,1))
     call unpack_matrix(tb, pa(:,:,2))
 
+    ! DEBUG: pa before ERI
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pa(1) before ERI norm=', sqrt(sum(pa(:,:,1)**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pa(2) before ERI norm=', sqrt(sum(pa(:,:,2)**2))
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] pa(1:5,1,1)=', pa(1,1,1), pa(2,1,1), pa(3,1,1), pa(4,1,1), pa(5,1,1)
+
     scale_exch = 1.0_dp
     scale_exch2 = 1.0_dp
     if (dft) then
@@ -332,6 +337,10 @@ contains
     call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
     call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
+    ! DEBUG: checkpoint 1 - H[T] in MO basis
+    write(iw,'(A,E20.12)') '[SF_ZVEC] ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+
 ! =============================================================================
 !   STEP 3: Compute H[X]*X contribution to RHS
 !   H[X] = (A-B)[X] is the response matrix applied to excitation amplitudes
@@ -355,6 +364,15 @@ contains
     ab2 => int2_data%amb(:,:,:,1)
 
     ! Transform (A-B)[X] to MO basis
+    ! DEBUG: ab2 integral norm
+    write(iw,'(A,E20.12)') '[SF_ZVEC] ab2 norm=', sqrt(sum(ab2(:,:,1)**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] bvec_mo norm=', sqrt(sum(bvec_mo(:,infos%tddft%target_state)**2))
+    write(iw,'(A,I3)') '[SF_ZVEC] target_state=', infos%tddft%target_state
+    write(iw,'(A,I6)') '[SF_ZVEC] bvec_mo size=', size(bvec_mo,1)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] bvec_mo(1:5)=', bvec_mo(1:5,infos%tddft%target_state)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] bvec_mo(6:10)=', bvec_mo(6:10,infos%tddft%target_state)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] bvec_mo(11:15)=', bvec_mo(11:15,infos%tddft%target_state)
+
     if (uhfref) then
       ! UHF: mixed alpha-beta transformation (alpha_occ x beta_virt)
       call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, ab2(:,:,1), nbf, mo_b, nbf, 0.0_dp, wrk1, nbf)
@@ -379,6 +397,10 @@ contains
                        wrk3, nbf,  &
                0.0_dp, hxb,  nbf)
 
+    ! DEBUG: checkpoint 2 - H[X]*X
+    write(iw,'(A,E20.12)') '[SF_ZVEC] hxa norm=', sqrt(sum(hxa**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] hxb norm=', sqrt(sum(hxb**2))
+
 ! =============================================================================
 !   STEP 4: Build unrelaxed difference density matrices T_ij and T_ab
 !   T_ij = -sum_a X_ia * X_ja  (occupied-occupied block, electron depletion)
@@ -394,17 +416,32 @@ contains
                        bvec_mo(:,infos%tddft%target_state), nocca,  &
                0.0_dp, tab,     nvirb)
 
+    ! DEBUG: checkpoint 3 - T matrices
+    write(iw,'(A,E20.12)') '[SF_ZVEC] Tij norm=', sqrt(sum(tij**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] Tab norm=', sqrt(sum(tab**2))
+
 ! =============================================================================
 !   STEP 5: Build full RHS of Z-vector equation
 !   RHS_ia = H[T]_ia + (H[X]*X)_ia
 !   This is the right-hand side of (A+B)*Z = -RHS
 ! =============================================================================
+    ! DEBUG: inputs to sfrcalc
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc hxa norm=', sqrt(sum(hxa**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc hxb norm=', sqrt(sum(hxb**2))
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] ab1_mo_a(1,1:5)=', ab1_mo_a(1,1), ab1_mo_a(1,2), ab1_mo_a(1,3), ab1_mo_a(1,4), ab1_mo_a(1,5)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] hxa(nocca+1,1:5)=', hxa(nocca+1,1), hxa(nocca+1,2), hxa(nocca+1,3), hxa(nocca+1,4), hxa(nocca+1,5)
+
     if (uhfref) then
       call sfrcalc(rhs, ab1_mo_a, ab1_mo_b, hxa, hxb, nocca, noccb)
     else
       call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
                    Tij, Tab, Fa, Fb, nocca, noccb)
     end if
+
+    ! DEBUG: checkpoint 4 - RHS
+    write(iw,'(A,E20.12)') '[SF_ZVEC] RHS norm=', sqrt(sum(rhs**2))
 
     write(iw,'(/3x,25("-")&
              &/6x,"START Z-VECTOR LOOP"&
@@ -425,7 +462,22 @@ contains
       call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
     end if
 
+    ! DEBUG: checkpoint preconditioner
+    write(iw,'(A,E20.12)') '[SF_ZVEC] xm norm=', sqrt(sum(xm**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] xminv norm=', sqrt(sum(xminv**2))
+
+    ! DEBUG: initial lhs before pcgrbpini
+    write(iw,'(A,E20.12)') '[SF_ZVEC] initial lhs norm=', sqrt(sum(lhs**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] rhs before pcgrbpini norm=', sqrt(sum(rhs**2))
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] rhs(1:5)=', rhs(1), rhs(2), rhs(3), rhs(4), rhs(5)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] xminv(1:5)=', xminv(1), xminv(2), xminv(3), xminv(4), xminv(5)
+
     call pcgrbpini(errv, pk, error, rhs, xminv, lhs)
+
+    ! DEBUG: pk after pcgrbpini - detailed
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pk after pcgrbpini norm=', sqrt(sum(pk**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] errv after pcgrbpini norm=', sqrt(sum(errv**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pk(1:5)=', pk(1), pk(2), pk(3), pk(4), pk(5)
 
     write(iw,'(" INITIAL ERROR =",3X,1P,E10.3,1X,"/",1P,E10.3)') error, cnvtol
 
@@ -435,6 +487,11 @@ contains
 !   Converge when ||residual||^2 < tolerance
 ! =============================================================================
     do iter = 1, infos%control%maxit_zv
+      ! DEBUG: CG iteration 1 - track pk
+      if (iter == 1) then
+        write(iw,'(A,E20.12)') '[SF_CG] iter1 pk norm=', sqrt(sum(pk**2))
+      endif
+
       if (uhfref) then
         ! UHF: convert Z-vector to AO for alpha and beta separately
         ! Alpha: pk(1:nocca*nvira) -> pa(:,:,1)
@@ -492,9 +549,24 @@ contains
         ! Beta: (noccb, nvirb)
         call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
+        ! DEBUG: CG iteration 1 - inputs to sflhs
+        if (iter == 1) then
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 pa(1) norm=', sqrt(sum(pa(:,:,1)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 pa(2) norm=', sqrt(sum(pa(:,:,2)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1(:,:,1) norm=', sqrt(sum(ab1(:,:,1)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1(:,:,2) norm=', sqrt(sum(ab1(:,:,2)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+        endif
+
         ! UHF: LHS = (A+B)*pk + (E_a - E_i)*pk
         call sflhs(lhs, pk, mo_energy_a, mo_energy_b, ab1_mo_a, ab1_mo_b, &
                    nocca, noccb, nvira, nvirb)
+
+        ! DEBUG: CG iteration 1 - output from sflhs
+        if (iter == 1) then
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 lhs norm=', sqrt(sum(lhs**2))
+        endif
       else
         ! ROHF: doc-socc-virt structure
 !       ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
@@ -634,6 +706,13 @@ contains
                     mo_energy_a, mo_energy_b, fa, fb, &
                     bvec_mo(:,infos%tddft%target_state), xk, &
                     hxb, ppija, ppijb, nocca, noccb)
+
+        ! DEBUG: checkpoint 5 - after sfwcal
+        write(iw,'(A,E20.12)') '[SF_ZVEC] xk norm=', sqrt(sum(xk**2))
+        write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_a norm=', sqrt(sum(wmo_a**2))
+        write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_b norm=', sqrt(sum(wmo_b**2))
+        write(iw,'(A,E20.12)') '[SF_ZVEC] ppija norm=', sqrt(sum(ppija**2))
+        write(iw,'(A,E20.12)') '[SF_ZVEC] ppijb norm=', sqrt(sum(ppijb**2))
 
         ! Transform W_alpha: MO -> AO, then symmetrize and pack
         call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
