@@ -538,7 +538,7 @@ contains
 !>   mrst=5: Quintet states (beta->alpha excitations)
 !>
 !> Algorithm:
-!>   1. Build unrelaxed T density and MRSF-specific CBC densities
+!>   1. Build unrelaxed T density and MRSF-specific SPC densities
 !>   2. Compute H[T] and spin-pair coupling contributions to RHS
 !>   3. Initialize preconditioner M = diag(epsilon_a - epsilon_i)
 !>   4. Solve Z-vector equation using CG or GMRES solver
@@ -589,7 +589,8 @@ contains
 
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
-      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, umrsfsp
+      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, umrsfsp, &
+      umrsfwcal
     use oqp_linalg
     use printing, only: print_module_info
 
@@ -819,12 +820,21 @@ contains
       solver_name = "CG"
     end if
 
-! =============================================================================
-!   STEP 1: Build unrelaxed T density and transform X-vector for target state
-!   For Singlet/Triplet (mrst=1,3): alpha->beta excitations, use mrsfxvec
-!   For Quintet (mrst=5): beta->alpha excitations, direct use
-!   NOTE: When SPC=0, use original X-vector to match SF behavior exactly
-! =============================================================================
+    ! DEBUG: STEP0 - Input parameters
+    write(iw,'(A)') '========== [ZVEC] STEP0_INPUT =========='
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 mo_energy_a norm=', sqrt(sum(mo_energy_a**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 mo_energy_b norm=', sqrt(sum(mo_energy_b**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 fock_a norm=', sqrt(sum(fock_a**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 fock_b norm=', sqrt(sum(fock_b**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 bvec_mo(target) norm=', sqrt(sum(bvec_mo(:,target_state)**2))
+    write(iw,'(A,I3)') '[ZVEC] STEP0 target_state=', target_state
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP0 bvec_mo(1:5)=', bvec_mo(1:5,target_state)
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP0 bvec_mo(6:10)=', bvec_mo(6:10,target_state)
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP0 bvec_mo(11:15)=', bvec_mo(11:15,target_state)
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 SPC_coco=', infos%tddft%spc_coco
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 SPC_ovov=', infos%tddft%spc_ovov
+    write(iw,'(A,E20.12)') '[ZVEC] STEP0 SPC_coov=', infos%tddft%spc_coov
+
     if (mrst==1 .or. mrst==3 ) then
       ! When SPC=0, skip mrsfxvec transformation to match SF exactly
       if ((infos%tddft%spc_coco == 0.0_dp) .and. &
@@ -832,6 +842,8 @@ contains
           (infos%tddft%spc_coov == 0.0_dp)) then
         bvec_mo_d(:,1) = bvec_mo(:,target_state)  ! Direct copy, no transformation
         write(iw,'(A)') '[MRSF_ZVEC] SPC=0: skipping mrsfxvec (SF equivalence)'
+        write(iw,'(A,E20.12)') '[ZVEC] STEP0.5 bvec_mo_d norm=', sqrt(sum(bvec_mo_d(:,1)**2))
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP0.5 bvec_mo_d(1:5)=', bvec_mo_d(1:5,1)
       else
         call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
       endif
@@ -844,6 +856,14 @@ contains
     else if (mrst==5 ) then
       call sfdmat(bvec_mo(:,target_state), td_abxc, mo_a, tb, ta, noccb, nocca)
     end if
+
+    ! DEBUG: STEP1 - After sfdmat (transition densities)
+    write(iw,'(A)') '========== [ZVEC] STEP1_SFDMAT =========='
+    write(iw,'(A,E20.12)') '[ZVEC] STEP1 ta norm=', sqrt(sum(ta**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP1 tb norm=', sqrt(sum(tb**2))
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP1 ta(1:5)=', ta(1), ta(2), ta(3), ta(4), ta(5)
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP1 tb(1:5)=', tb(1), tb(2), tb(3), tb(4), tb(5)
+    write(iw,'(A,E20.12)') '[ZVEC] STEP1 td_abxc norm=', sqrt(sum(td_abxc**2))
 
     bvec(1:nbf,1:nbf,1:1) => td_abxc
 
@@ -931,6 +951,12 @@ contains
 !   STEP 2: Compute H[T] contribution to RHS
 !   H[T]_ia = sum_jb T_jb * <ij||ab> + XC contribution
 ! =============================================================================
+    ! DEBUG: STEP2 - H[T] density BEFORE ERI (same position as SF)
+    write(iw,'(A)') '========== [ZVEC] STEP2_H[T] =========='
+    write(iw,'(A,E20.12)') '[ZVEC] STEP2 pa(1) norm=', sqrt(sum(pa(:,:,1)**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP2 pa(2) norm=', sqrt(sum(pa(:,:,2)**2))
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP2 pa(1:5,1,1)=', pa(1,1,1), pa(2,1,1), pa(3,1,1), pa(4,1,1), pa(5,1,1)
+
     int2_data = int2_tdgrd_data_t( &
         d2 = pa, &
         int_apb = .true., &
@@ -963,6 +989,10 @@ contains
     ! Transform H[T] from AO to MO basis
     call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
     call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+
+    ! DEBUG: STEP2 - H[T] in MO basis (after transformation)
+    write(iw,'(A,E20.12)') '[ZVEC] STEP2 ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP2 ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
 
 ! =============================================================================
 !   STEP 3: Build MRSF-specific CBC densities and spin-pair coupling
@@ -1018,6 +1048,16 @@ contains
         if (mrst==3) fmrst2(:,1:6,:,:) = -1.0_dp*fmrst2(:,1:6,:,:)
       endif
 
+      ! DEBUG: STEP3 - H[X] (A-B)[X] integrals in AO
+      write(iw,'(A)') '========== [ZVEC] STEP3_H[X] =========='
+      if (uref) then
+        write(iw,'(A,E20.12)') '[ZVEC] STEP3 H[X]_AO norm=', sqrt(sum(fmrst2(1,11,:,:)**2))
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP3 H[X]_AO(1,1:5)=', fmrst2(1,11,1,1), fmrst2(1,11,1,2), fmrst2(1,11,1,3), fmrst2(1,11,1,4), fmrst2(1,11,1,5)
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP3 H[X]_AO(5,1:5)=', fmrst2(1,11,5,1), fmrst2(1,11,5,2), fmrst2(1,11,5,3), fmrst2(1,11,5,4), fmrst2(1,11,5,5)
+      else
+        write(iw,'(A,E20.12)') '[ZVEC] STEP3 H[X]_AO norm=', sqrt(sum(fmrst2(1,7,:,:)**2))
+      endif
+
       ! Spin pair coupling
       if (uref) then
         if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
@@ -1040,6 +1080,14 @@ contains
         endif
 
         call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
+
+        ! DEBUG: STEP3 - H[X] in MO and X expanded
+        write(iw,'(A,E20.12)') '[ZVEC] STEP3 H[X]_MO norm=', sqrt(sum(wrk2**2))
+        write(iw,'(A,E20.12)') '[ZVEC] STEP3 X_expanded norm=', sqrt(sum(wrk3**2))
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP3 H[X]_MO(1,1:5)=', wrk2(1,1), wrk2(1,2), wrk2(1,3), wrk2(1,4), wrk2(1,5)
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP3 H[X]_MO(nocca+1,1:5)=', wrk2(nocca+1,1), wrk2(nocca+1,2), wrk2(nocca+1,3), wrk2(nocca+1,4), wrk2(nocca+1,5)
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP3 X_exp(1,1:5)=', wrk3(1,1), wrk3(1,2), wrk3(1,3), wrk3(1,4), wrk3(1,5)
+        write(iw,'(A,5E15.7)') '[ZVEC] STEP3 X_exp(nocca+1,1:5)=', wrk3(nocca+1,1), wrk3(nocca+1,2), wrk3(nocca+1,3), wrk3(nocca+1,4), wrk3(nocca+1,5)
 
         call dgemm('n', 't', nbf, nocca, nbf, &
                    2.0_dp, wrk2, nbf, &
@@ -1086,19 +1134,28 @@ contains
 !   STEP 4: Spin-pair coupling contributions (MRSF-specific)
 !   Adds ov-ov, co-co, co-ov coupling terms for proper spin eigenstates
 ! -----------------------------------------------------------------------------
-      ! DEBUG: checkpoint 2a - H[X]*X BEFORE SPC
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] hxa BEFORE spc norm=', sqrt(sum(hxa**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] hxb BEFORE spc norm=', sqrt(sum(hxb**2))
+      ! DEBUG: STEP3 - hxa, hxb BEFORE SPC
+      write(iw,'(A,E20.12)') '[ZVEC] STEP3 hxa norm=', sqrt(sum(hxa**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP3 hxb norm=', sqrt(sum(hxb**2))
+      write(iw,'(A,5E15.7)') '[ZVEC] STEP3 hxa(nocca+1,1:5)=', hxa(nocca+1,1), hxa(nocca+1,2), hxa(nocca+1,3), hxa(nocca+1,4), hxa(nocca+1,5)
+      write(iw,'(A,5E15.7)') '[ZVEC] STEP3 hxb(1,1:5)=', hxb(1,1), hxb(1,2), hxb(1,3), hxb(1,4), hxb(1,5)
 
-      if (uref) then
-        call umrsfsp(hxa, hxb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+      ! Spin-pair coupling: skip when SPC=0 (SF equivalence)
+      if ((infos%tddft%spc_coco /= 0.0_dp) .or. &
+          (infos%tddft%spc_ovov /= 0.0_dp) .or. &
+          (infos%tddft%spc_coov /= 0.0_dp)) then
+        if (uref) then
+          call umrsfsp(hxa, hxb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+        else
+          call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+        endif
       else
-        call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+        write(iw,'(A)') '[MRSF_ZVEC] SPC=0: skipping mrsfsp/umrsfsp (SF equivalence)'
       endif
 
-      ! DEBUG: checkpoint 2b - H[X]*X AFTER SPC
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] hxa AFTER spc norm=', sqrt(sum(hxa**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] hxb AFTER spc norm=', sqrt(sum(hxb**2))
+      ! DEBUG: STEP3 - hxa, hxb AFTER SPC (MRSF-specific)
+      write(iw,'(A,E20.12)') '[ZVEC] STEP3 hxa_post_SPC norm=', sqrt(sum(hxa**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP3 hxb_post_SPC norm=', sqrt(sum(hxb**2))
 
 ! -----------------------------------------------------------------------------
 !   STEP 5: Build unrelaxed difference density matrices T_ij and T_ab
@@ -1115,21 +1172,23 @@ contains
                          bvec_mo_d, nocca, &
                  0.0_dp, tab, nvirb)
 
-      ! DEBUG: checkpoint 3 - T matrices
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] Tij norm=', sqrt(sum(tij**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] Tab norm=', sqrt(sum(tab**2))
+      ! DEBUG: STEP4 - T matrices (unrelaxed density)
+      write(iw,'(A)') '========== [ZVEC] STEP4_T_DENSITY =========='
+      write(iw,'(A,E20.12)') '[ZVEC] STEP4 Tij norm=', sqrt(sum(tij**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP4 Tab norm=', sqrt(sum(tab**2))
 
 ! -----------------------------------------------------------------------------
 !   STEP 6: Build Z-vector RHS for Singlet/Triplet states
 !   RHS includes Fock matrix, transition density, and spin-pair contributions
 ! -----------------------------------------------------------------------------
-      ! DEBUG: inputs to sfrcalc
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] before sfrcalc ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] before sfrcalc ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] before sfrcalc hxa norm=', sqrt(sum(hxa**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] before sfrcalc hxb norm=', sqrt(sum(hxb**2))
-      write(iw,'(A,5E15.7)') '[MRSF_ZVEC] ab1_mo_a(1,1:5)=', ab1_mo_a(1,1), ab1_mo_a(1,2), ab1_mo_a(1,3), ab1_mo_a(1,4), ab1_mo_a(1,5)
-      write(iw,'(A,5E15.7)') '[MRSF_ZVEC] hxa(nocca+1,1:5)=', hxa(nocca+1,1), hxa(nocca+1,2), hxa(nocca+1,3), hxa(nocca+1,4), hxa(nocca+1,5)
+      ! DEBUG: STEP5 - inputs to RHS calculation
+      write(iw,'(A)') '========== [ZVEC] STEP5_RHS =========='
+      write(iw,'(A,E20.12)') '[ZVEC] STEP5 ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP5 ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP5 hxa norm=', sqrt(sum(hxa**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP5 hxb norm=', sqrt(sum(hxb**2))
+      write(iw,'(A,5E15.7)') '[ZVEC] STEP5 ab1_mo_a(1,1:5)=', ab1_mo_a(1,1), ab1_mo_a(1,2), ab1_mo_a(1,3), ab1_mo_a(1,4), ab1_mo_a(1,5)
+      write(iw,'(A,5E15.7)') '[ZVEC] STEP5 hxa(nocca+1,1:5)=', hxa(nocca+1,1), hxa(nocca+1,2), hxa(nocca+1,3), hxa(nocca+1,4), hxa(nocca+1,5)
 
       if (uref) then
         ! UHF: simple alpha/beta occ-virt structure
@@ -1140,8 +1199,9 @@ contains
                      Tij, Tab, Fa, Fb, nocca, noccb)
       end if
 
-      ! DEBUG: checkpoint 4 - RHS
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] RHS norm=', sqrt(sum(rhs**2))
+      ! DEBUG: STEP5 - RHS after sfrcalc
+      write(iw,'(A,E20.12)') '[ZVEC] STEP5 RHS norm=', sqrt(sum(rhs**2))
+      write(iw,'(A,5E15.7)') '[ZVEC] STEP5 RHS(1:5)=', rhs(1), rhs(2), rhs(3), rhs(4), rhs(5)
 
     else if(mrst==5) then
 
@@ -1218,9 +1278,11 @@ contains
        call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
     endif
 
-    ! DEBUG: checkpoint preconditioner
-    write(iw,'(A,E20.12)') '[MRSF_ZVEC] xm norm=', sqrt(sum(xm**2))
-    write(iw,'(A,E20.12)') '[MRSF_ZVEC] xminv norm=', sqrt(sum(xminv**2))
+    ! DEBUG: STEP6 - Preconditioner
+    write(iw,'(A)') '========== [ZVEC] STEP6_PRECOND =========='
+    write(iw,'(A,E20.12)') '[ZVEC] STEP6 xm norm=', sqrt(sum(xm**2))
+    write(iw,'(A,E20.12)') '[ZVEC] STEP6 xminv norm=', sqrt(sum(xminv**2))
+    write(iw,'(A,5E15.7)') '[ZVEC] STEP6 xminv(1:5)=', xminv(1), xminv(2), xminv(3), xminv(4), xminv(5)
 
 ! -----------------------------------------------------------------------------
 !   STEP 8: Solve Z-vector equation (A+B)*Z = -RHS
@@ -1352,20 +1414,12 @@ contains
                        nocca, noccb)
       endif
 
-      ! DEBUG: initial lhs before pcgrbpini
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] initial lhs norm=', sqrt(sum(lhs**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] initial ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] initial ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] rhs before pcgrbpini norm=', sqrt(sum(rhs**2))
-      write(iw,'(A,5E15.7)') '[MRSF_ZVEC] rhs(1:5)=', rhs(1), rhs(2), rhs(3), rhs(4), rhs(5)
-      write(iw,'(A,5E15.7)') '[MRSF_ZVEC] xminv(1:5)=', xminv(1), xminv(2), xminv(3), xminv(4), xminv(5)
-
       call pcgrbpini(errv, pk, error, rhs, xminv, lhs)
 
-      ! DEBUG: pk after pcgrbpini - detailed
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] pk after pcgrbpini norm=', sqrt(sum(pk**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] errv after pcgrbpini norm=', sqrt(sum(errv**2))
-      write(iw,'(A,E20.12)') '[MRSF_ZVEC] pk(1:5)=', pk(1), pk(2), pk(3), pk(4), pk(5)
+      ! DEBUG: STEP6 - CG initialization
+      write(iw,'(A,E20.12)') '[ZVEC] STEP6 pk_init norm=', sqrt(sum(pk**2))
+      write(iw,'(A,E20.12)') '[ZVEC] STEP6 errv_init norm=', sqrt(sum(errv**2))
+      write(iw,'(A,5E15.7)') '[ZVEC] STEP6 pk(1:5)=', pk(1), pk(2), pk(3), pk(4), pk(5)
 
       write(iw,'(" Initial error =",3x,1p,e10.3,1x,"/",1p,e10.3)') error, cnvtol
       call flush(iw)
@@ -1574,7 +1628,7 @@ contains
 ! -----------------------------------------------------------------------------
 !   STEP 11: Build energy-weighted density matrix W for gradient
 !   W_ij = Z contributions with orbital energies and Fock matrices
-!   mrst=1,3: sfwcal (UHF) or mrsfrowcal (ROHF)
+!   mrst=1,3: umrsfwcal (UHF) or mrsfrowcal (ROHF)
 !   mrst=5: mrsfqrowcal (Quintet)
 ! -----------------------------------------------------------------------------
 !   Calculate W (in MO basis)
@@ -1583,37 +1637,25 @@ contains
     if (mrst==1 .or. mrst==3) then
 
       if (uref) then
-        ! UHF: separate alpha and beta W matrices using SF UHF function
+        ! UHF-MRSF: use sfwcal + MRSF correction for W_ij only
         block
           real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:), wao_a(:), wao_b(:)
-          logical :: spc_zero
+          integer :: ii, jj
           allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
           allocate(wao_a(nbf_tri), wao_b(nbf_tri), source=0.0_dp)
 
-          ! Check if SPC=0: when all SPC parameters are zero, use original X-vector
-          ! to match SF behavior exactly
-          spc_zero = (infos%tddft%spc_coco == 0.0_dp) .and. &
-                     (infos%tddft%spc_ovov == 0.0_dp) .and. &
-                     (infos%tddft%spc_coov == 0.0_dp)
+          call sfwcal(wmo_a, wmo_b, mrsf_energies(target_state), &
+                      mo_energy_a, mo_energy_b, fa, fb, &
+                      bvec_mo_d(:,1), xk, hxb, ppija, ppijb, nocca, noccb)
 
-          if (spc_zero) then
-            ! SPC=0: use original bvec_mo (same as SF)
-            call sfwcal(wmo_a, wmo_b, mrsf_energies(target_state), &
-                        mo_energy_a, mo_energy_b, fa, fb, &
-                        bvec_mo(:,target_state), xk, hxb, ppija, ppijb, nocca, noccb)
-          else
-            ! SPC>0: use transformed bvec_mo_d for spin-adapted states
-            call sfwcal(wmo_a, wmo_b, mrsf_energies(target_state), &
-                        mo_energy_a, mo_energy_b, fa, fb, &
-                        bvec_mo_d(:,1), xk, hxb, ppija, ppijb, nocca, noccb)
-          end if
-
-          ! DEBUG: checkpoint 5 - after sfwcal
-          write(iw,'(A,E20.12)') '[MRSF_ZVEC] xk norm=', sqrt(sum(xk**2))
-          write(iw,'(A,E20.12)') '[MRSF_ZVEC] wmo_a norm=', sqrt(sum(wmo_a**2))
-          write(iw,'(A,E20.12)') '[MRSF_ZVEC] wmo_b norm=', sqrt(sum(wmo_b**2))
-          write(iw,'(A,E20.12)') '[MRSF_ZVEC] ppija norm=', sqrt(sum(ppija**2))
-          write(iw,'(A,E20.12)') '[MRSF_ZVEC] ppijb norm=', sqrt(sum(ppijb**2))
+          ! MRSF correction: add xhxa(j,i) to W_ij (alpha closed-closed)
+          ! sfwcal returns -W, so we subtract to add before final negation
+          do ii = 1, noccb
+            do jj = 1, ii
+              wmo_a(ii,jj) = wmo_a(ii,jj) - hxa(jj,ii)
+            end do
+            wmo_a(ii,ii) = wmo_a(ii,ii) + 0.5_dp * hxa(ii,ii)
+          end do
 
           ! Transform W_alpha: MO -> AO
           call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
