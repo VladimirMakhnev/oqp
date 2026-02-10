@@ -2284,148 +2284,6 @@ end subroutine umrsfmntoia
 
   end subroutine mrsfrowcal
 
-!----------------------------------------------------------------------
-! UHF-MRSF W matrix calculation
-! Based on sfwcal (UHF-SF) + MRSF corrections from xhxa/xhxb
-!
-! Alpha W_IJ has three sub-blocks with different corrections:
-!   W_ij (1:nocb x 1:nocb): sfwcal + xhxa(j,i)
-!   W_ix (1:nocb x nocb+1:noca): sfwcal + xhxa(i,x) + xhxb(i,x)
-!   W_xy (nocb+1:noca x nocb+1:noca): sfwcal + xhxa(y,x) + xhxb(y,x)
-!
-! Beta W_AB: sfwcal + xhxb(b,a)
-!----------------------------------------------------------------------
-  subroutine umrsfwcal(wmo_a, wmo_b, target_energy, mo_energy_a, mo_energy_b, &
-                       fa, fb, bvec, xk, xhxa, xhxb, hppija, hppijb, noca, nocb)
-    use precision, only: dp
-
-    implicit none
-
-    real(kind=dp), intent(out), dimension(:,:) :: wmo_a, wmo_b
-    real(kind=dp), intent(in) :: target_energy
-    real(kind=dp), intent(in), dimension(:) :: mo_energy_a, mo_energy_b
-    real(kind=dp), intent(in), dimension(:,:) :: fa, fb
-    real(kind=dp), intent(in), dimension(:) :: bvec
-    real(kind=dp), intent(in), dimension(:) :: xk
-    real(kind=dp), intent(in), dimension(:,:) :: xhxa, xhxb
-    real(kind=dp), intent(in), dimension(:,:) :: hppija, hppijb
-    integer, intent(in) :: noca, nocb
-
-    real(kind=dp) :: dum, ee
-    integer :: i, j, k, x, y, ii, jj, ij, nbf, nvira, nvirb, iia
-    integer :: lr1, lr2
-
-    nbf = ubound(fa, 1)
-    nvira = nbf - noca
-    nvirb = nbf - nocb
-    ee = target_energy
-    lr1 = nocb + 1  ! First open shell
-    lr2 = noca      ! Last open shell
-
-    wmo_a = 0.0_dp
-    wmo_b = 0.0_dp
-
-    ! ===== ALPHA W_IJ: Three sub-blocks =====
-
-    ! ----- W_ij (closed-closed): sfwcal + xhxa(j,i) -----
-    do i = 1, nocb
-      do j = 1, i
-        dum = 0.0_dp
-        do k = nocb+1, nbf
-          ii = (k - nocb - 1)*noca + i
-          jj = (k - nocb - 1)*noca + j
-          if (ii >= 1 .and. ii <= size(bvec) .and. jj >= 1 .and. jj <= size(bvec)) then
-            dum = dum + (ee - mo_energy_b(k))*bvec(ii)*bvec(jj)
-          end if
-        end do
-        wmo_a(i,j) = dum + dum + hppija(i,j) + xhxa(j,i)
-      end do
-    end do
-
-    ! ----- W_ix (closed-open): sfwcal + xhxa(i,x) + xhxb(i,x) -----
-    do x = lr1, lr2
-      do i = 1, nocb
-        dum = 0.0_dp
-        do k = nocb+1, nbf
-          ii = (k - nocb - 1)*noca + i
-          jj = (k - nocb - 1)*noca + x
-          if (ii >= 1 .and. ii <= size(bvec) .and. jj >= 1 .and. jj <= size(bvec)) then
-            dum = dum + (ee - mo_energy_b(k))*bvec(ii)*bvec(jj)
-          end if
-        end do
-        ! Note: W_ix is stored in wmo_a(i,x) with i<x, so lower triangle
-        wmo_a(x,i) = dum + dum + hppija(x,i) + xhxa(i,x) + xhxb(i,x)
-      end do
-    end do
-
-    ! ----- W_xy (open-open): sfwcal + xhxa(y,x) + xhxb(y,x) -----
-    do x = lr1, lr2
-      do y = lr1, x
-        dum = 0.0_dp
-        do k = nocb+1, nbf
-          ii = (k - nocb - 1)*noca + x
-          jj = (k - nocb - 1)*noca + y
-          if (ii >= 1 .and. ii <= size(bvec) .and. jj >= 1 .and. jj <= size(bvec)) then
-            dum = dum + (ee - mo_energy_b(k))*bvec(ii)*bvec(jj)
-          end if
-        end do
-        wmo_a(x,y) = dum + dum + hppija(x,y) + xhxa(y,x) + xhxb(y,x)
-      end do
-    end do
-
-    ! ===== BETA W_IJ (closed-closed only) =====
-    do i = 1, nocb
-      do j = 1, i
-        wmo_b(i,j) = hppijb(i,j)
-      end do
-    end do
-
-    ! ===== BETA W_AB (virtual-virtual): sfwcal + xhxb(b,a) =====
-    do i = nocb+1, nbf
-      ii = i - nocb
-      do j = nocb+1, i
-        jj = j - nocb
-        dum = 0.0_dp
-        do k = 1, noca
-          iia = (ii - 1)*noca + k
-          ij  = (jj - 1)*noca + k
-          if (iia >= 1 .and. iia <= size(bvec) .and. ij >= 1 .and. ij <= size(bvec)) then
-            dum = dum + (ee + mo_energy_a(k))*bvec(iia)*bvec(ij)
-          end if
-        end do
-        wmo_b(i,j) = dum + dum + xhxb(j,i)
-      end do
-    end do
-
-    ! ===== W_IA ALPHA =====
-    iia = 0
-    do j = noca+1, nbf
-      do i = 1, noca
-        iia = iia + 1
-        wmo_a(i,j) = mo_energy_a(i)*xk(iia)
-      end do
-    end do
-
-    ! ===== W_IA BETA =====
-    iia = noca * nvira
-    do j = nocb+1, nbf
-      do i = 1, nocb
-        iia = iia + 1
-        wmo_b(i,j) = xhxb(i,j) + mo_energy_b(i)*xk(iia)
-      end do
-    end do
-
-    ! ===== Scale diagonal and negate =====
-    do i = 1, nbf
-      wmo_a(i,i) = wmo_a(i,i)*0.5_dp
-      wmo_b(i,i) = wmo_b(i,i)*0.5_dp
-    end do
-
-    wmo_a = -wmo_a
-    wmo_b = -wmo_b
-
-  end subroutine umrsfwcal
-
   subroutine mrsfqrorhs(rhs, xhxa, xhxb, hpta, hptb, tab, tij, fa, fb, noca,  &
                         nocb)
 
@@ -2895,7 +2753,7 @@ end subroutine umrsfmntoia
                (max(abs(wrk2(i)), tol))**2) * (bvec_mo(i,j,js))**2
 !     ----- co -----
             else if (i .le. noccb) then
-               ss = ss + (nocca-1-a + (wrk2(i))**2 - (wrk2(j+noccb))**2 &
+               ss = ss + (nocca-1-a + wrk2(i) - (wrk2(j+noccb))**2 &
                  - b * ((wrk2(j+noccb)) / max(abs(wrk2(i)), tol))**2) &
                  * (bvec_mo(i,j,js))**2
 
@@ -2927,7 +2785,7 @@ end subroutine umrsfmntoia
 
 !     ----- co -----
             else if (i .le. noccb) then
-               ss = ss + (nocca-1 - a + (wrk2(i))**2 - (wrk2(j+noccb))**2 &
+               ss = ss + (nocca-1 - a + wrk2(i) - (wrk2(j+noccb))**2 &
                      + b * ( (wrk2(j+noccb) / &
                      max(abs(wrk2(i)),1.0d-12))**2 )) * (bvec_mo(i,j,js))**2
 

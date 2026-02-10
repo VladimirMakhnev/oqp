@@ -589,8 +589,7 @@ contains
 
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
-      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, umrsfsp, &
-      umrsfwcal
+      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, umrsfcbc, umrsfsp
     use oqp_linalg
     use printing, only: print_module_info
 
@@ -636,6 +635,10 @@ contains
     real(kind=dp), allocatable, target :: wrk1(:,:), wrk2(:,:), wrk3(:,:)
     real(kind=dp), allocatable, target :: wrk2a(:,:), wrk2b(:,:)
     real(kind=dp), pointer :: wrk1t(:)
+
+  ! W matrix (UHF path)
+    real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:)
+    real(kind=dp), allocatable :: wao_a(:), wao_b(:)
 
   ! SF-TD Gradient data
     real(kind=dp), allocatable :: &
@@ -836,18 +839,12 @@ contains
     write(iw,'(A,E20.12)') '[ZVEC] STEP0 SPC_coov=', infos%tddft%spc_coov
 
     if (mrst==1 .or. mrst==3 ) then
-      ! When SPC=0, skip mrsfxvec transformation to match SF exactly
-      if ((infos%tddft%spc_coco == 0.0_dp) .and. &
-          (infos%tddft%spc_ovov == 0.0_dp) .and. &
-          (infos%tddft%spc_coov == 0.0_dp)) then
-        bvec_mo_d(:,1) = bvec_mo(:,target_state)  ! Direct copy, no transformation
-        write(iw,'(A)') '[MRSF_ZVEC] SPC=0: skipping mrsfxvec (SF equivalence)'
-        write(iw,'(A,E20.12)') '[ZVEC] STEP0.5 bvec_mo_d norm=', sqrt(sum(bvec_mo_d(:,1)**2))
-        write(iw,'(A,5E15.7)') '[ZVEC] STEP0.5 bvec_mo_d(1:5)=', bvec_mo_d(1:5,1)
-      else
-        call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-      endif
-      ! Use transformed (or copied) bvec_mo_d for sfdmat
+      ! X_tilde = U * X (Lee et al. 2020, Section II)
+      ! Singlet: X_tilde(S1,S1) = X(S1,S1)/sqrt(2), X_tilde(S2,S2) = -X(S1,S1)/sqrt(2)
+      ! Triplet: X_tilde(S1,S1) = X(S1,S1)/sqrt(2), X_tilde(S2,S2) = +X(S1,S1)/sqrt(2)
+      ! All other elements unchanged: X_tilde(i,a) = X(i,a)
+      call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
+      ! td_abxc(mu,nu) = sum_{i,a} C_alpha(mu,i)*X_tilde(i,a)*C_beta(nu,a)
       if (uref) then
         call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb, mo_b)
       else
@@ -995,12 +992,17 @@ contains
     write(iw,'(A,E20.12)') '[ZVEC] STEP2 ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
 
 ! =============================================================================
-!   STEP 3: Build MRSF-specific CBC densities and spin-pair coupling
-!   For Singlet/Triplet: CBC density from alpha->beta excitations
-!   For Quintet: uses beta->alpha structure
+!   STEP 3: Build MRSF transition densities and compute H[X]*X
+!   umrsfcbc builds 11 density matrices from RAW X (not U-transformed):
+!     ball(11) = sum_{i,a} C_a(mu,i)*X(i,a)*C_b(nu,a) + U-transformed SOMO terms
+!     (1-10)   = SPC sub-densities (SOMO-virtual, closed-SOMO, cross terms)
+!   int2_umrsf computes 2e response for all 11 densities simultaneously
+!   hxa/hxb are then contracted with U-transformed X_tilde from mrsfxvec
 ! =============================================================================
     if (mrst==1 .or. mrst==3) then
 
+      ! wrk1 = X_raw as 2D matrix (before U transformation)
+      ! umrsfcbc embeds U transformation for SOMO-SOMO in ball density internally
       call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
       if (uref) then
         call umrsfcbc(infos, mo_a, mo_b, wrk1, fmrst1(1,:,:,:))
@@ -1058,7 +1060,8 @@ contains
         write(iw,'(A,E20.12)') '[ZVEC] STEP3 H[X]_AO norm=', sqrt(sum(fmrst2(1,7,:,:)**2))
       endif
 
-      ! Spin pair coupling
+      ! SPC scaling: fmrst2(10) *= spc_coco/hfscale, etc.
+      ! When SPC=0, sub-densities (1-10) are zeroed; only fmrst2(11) remains
       if (uref) then
         if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
            fmrst2(:,10,:,:) = fmrst2(:,10,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
@@ -1066,19 +1069,13 @@ contains
            fmrst2(:,9,:,:) = fmrst2(:,9,:,:) * infos%tddft%spc_ovov / infos%tddft%hfscale
         if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
            fmrst2(:,1:8,:,:) = fmrst2(:,1:8,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
-        ! UHF: mixed alpha-beta transformation (same as SF)
+        ! sigma(p_alpha, q_beta) = C_alpha^T * H[X_tilde]_AO * C_beta
         call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, fmrst2(1,11,:,:), nbf, mo_b, nbf, 0.0_dp, wrk1, nbf)
         call dgemm('t', 'n', nbf, nbf, nbf, 1.0_dp, mo_a, nbf, wrk1, nbf, 0.0_dp, wrk2, nbf)
 
-        ! When SPC=0, skip mrsfxvec transformation
-        if ((infos%tddft%spc_coco == 0.0_dp) .and. &
-            (infos%tddft%spc_ovov == 0.0_dp) .and. &
-            (infos%tddft%spc_coov == 0.0_dp)) then
-          bvec_mo_d(:,1) = bvec_mo(:,target_state)
-        else
-          call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-        endif
-
+        ! X_tilde = U * X for hxa/hxb contraction
+        call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
+        ! wrk3(i_alpha, a_beta) = X_tilde as 2D matrix
         call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
 
         ! DEBUG: STEP3 - H[X] in MO and X expanded
@@ -1089,12 +1086,13 @@ contains
         write(iw,'(A,5E15.7)') '[ZVEC] STEP3 X_exp(1,1:5)=', wrk3(1,1), wrk3(1,2), wrk3(1,3), wrk3(1,4), wrk3(1,5)
         write(iw,'(A,5E15.7)') '[ZVEC] STEP3 X_exp(nocca+1,1:5)=', wrk3(nocca+1,1), wrk3(nocca+1,2), wrk3(nocca+1,3), wrk3(nocca+1,4), wrk3(nocca+1,5)
 
+        ! hxa(p_alpha, i_alpha) = 2 * sum_q sigma(p,q) * X_tilde(i,q)
         call dgemm('n', 't', nbf, nocca, nbf, &
                    2.0_dp, wrk2, nbf, &
                            wrk3, nbf, &
                    0.0_dp, hxa, nbf)
 
-        ! Use same wrk2 for hxb (same as SF - no separate transformation)
+        ! hxb(q_beta, r_beta) = 2 * sum_i sigma(i,q) * X_tilde(i,r)
         call dgemm('t', 'n', nbf, nbf, nocca, &
                    2.0_dp, wrk2, nbf, &
                            wrk3, nbf, &
@@ -1108,14 +1106,8 @@ contains
            fmrst2(:,1:4,:,:) = fmrst2(:,1:4,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
         call orthogonal_transform('n', nbf, mo_a, fmrst2(1,7,:,:), wrk2, wrk1)
 
-        ! When SPC=0, skip mrsfxvec transformation to match SF exactly
-        if ((infos%tddft%spc_coco == 0.0_dp) .and. &
-            (infos%tddft%spc_ovov == 0.0_dp) .and. &
-            (infos%tddft%spc_coov == 0.0_dp)) then
-          bvec_mo_d(:,1) = bvec_mo(:,target_state)  ! Direct copy, no transformation
-        else
-          call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-        endif
+        ! U transformation: expand MRSF eigenvector to SF-space amplitudes
+        call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
 
         call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
 
@@ -1140,7 +1132,9 @@ contains
       write(iw,'(A,5E15.7)') '[ZVEC] STEP3 hxa(nocca+1,1:5)=', hxa(nocca+1,1), hxa(nocca+1,2), hxa(nocca+1,3), hxa(nocca+1,4), hxa(nocca+1,5)
       write(iw,'(A,5E15.7)') '[ZVEC] STEP3 hxb(1,1:5)=', hxb(1,1), hxb(1,2), hxb(1,3), hxb(1,4), hxb(1,5)
 
-      ! Spin-pair coupling: skip when SPC=0 (SF equivalence)
+      ! SPC correction to hxa/hxb (Lee et al. 2020, Eq. III.12)
+      ! Adds OV-OV, CO-CO, CO-OV coupling terms from fmrst2(1-10) sub-responses
+      ! Skip when SPC=0: sub-responses already zeroed by scaling above
       if ((infos%tddft%spc_coco /= 0.0_dp) .or. &
           (infos%tddft%spc_ovov /= 0.0_dp) .or. &
           (infos%tddft%spc_coov /= 0.0_dp)) then
@@ -1158,15 +1152,16 @@ contains
       write(iw,'(A,E20.12)') '[ZVEC] STEP3 hxb_post_SPC norm=', sqrt(sum(hxb**2))
 
 ! -----------------------------------------------------------------------------
-!   STEP 5: Build unrelaxed difference density matrices T_ij and T_ab
-!   T_ij = -X_ia*X_ja (occ-occ), T_ab = X_ia*X_ib (virt-virt)
+!   STEP 5: Unrelaxed difference density T (Lee et al. 2020, Eq. III.11)
+!   Uses X_tilde (U-transformed), not raw X
+!   T^alpha_ij = -sum_a X_tilde(i,a) * X_tilde(j,a)
+!   T^beta_ab  = +sum_i X_tilde(i,a) * X_tilde(i,b)
 ! -----------------------------------------------------------------------------
       call dgemm('n', 't', nocca, nocca, nvirb, &
                 -1.0_dp, bvec_mo_d, nocca, &
                          bvec_mo_d, nocca, &
                  0.0_dp, tij, nocca)
 
-   !  Tb(a-,b-):= X(i+,a-)*X(i+,b-) for singlet and triplet
       call dgemm('t', 'n', nvirb, nvirb, nocca, &
                  1.0_dp, bvec_mo_d, nocca, &
                          bvec_mo_d, nocca, &
@@ -1178,8 +1173,10 @@ contains
       write(iw,'(A,E20.12)') '[ZVEC] STEP4 Tab norm=', sqrt(sum(tab**2))
 
 ! -----------------------------------------------------------------------------
-!   STEP 6: Build Z-vector RHS for Singlet/Triplet states
-!   RHS includes Fock matrix, transition density, and spin-pair contributions
+!   STEP 6: Z-vector RHS via sfrcalc (same as SF)
+!   R^alpha(i,a) = -(H+[T]_ia + hxa(a,i))
+!   R^beta(i,a)  = -(H+[T]_ia - hxb(i,a))
+!   Inputs: ab1_mo = H+[T] from STEP 2, hxa/hxb from STEP 3+4
 ! -----------------------------------------------------------------------------
       ! DEBUG: STEP5 - inputs to RHS calculation
       write(iw,'(A)') '========== [ZVEC] STEP5_RHS =========='
@@ -1628,7 +1625,7 @@ contains
 ! -----------------------------------------------------------------------------
 !   STEP 11: Build energy-weighted density matrix W for gradient
 !   W_ij = Z contributions with orbital energies and Fock matrices
-!   mrst=1,3: umrsfwcal (UHF) or mrsfrowcal (ROHF)
+!   mrst=1,3: sfwcal (UHF) or mrsfrowcal (ROHF)
 !   mrst=5: mrsfqrowcal (Quintet)
 ! -----------------------------------------------------------------------------
 !   Calculate W (in MO basis)
@@ -1637,43 +1634,32 @@ contains
     if (mrst==1 .or. mrst==3) then
 
       if (uref) then
-        ! UHF-MRSF: use sfwcal + MRSF correction for W_ij only
-        block
-          real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:), wao_a(:), wao_b(:)
-          integer :: ii, jj
-          allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
-          allocate(wao_a(nbf_tri), wao_b(nbf_tri), source=0.0_dp)
+        ! W^alpha_IJ = 2*sum_a (omega - eps^beta_a)*X_tilde(I,a)*X_tilde(J,a) + H+_IJ[P]
+        ! W^beta_AB  = 2*sum_i (omega + eps^alpha_i)*X_tilde(i,A)*X_tilde(i,B)
+        ! W^alpha_IA = eps^alpha_I * Z^alpha(I,A)
+        ! W^beta_IA  = hxb(I,A) + eps^beta_I * Z^beta(I,A)
+        ! Same sfwcal as SF, with X_tilde = U*X (Lee et al. 2020, Eq. III.18)
+        allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
+        allocate(wao_a(nbf_tri), wao_b(nbf_tri))
 
-          call sfwcal(wmo_a, wmo_b, mrsf_energies(target_state), &
-                      mo_energy_a, mo_energy_b, fa, fb, &
-                      bvec_mo_d(:,1), xk, hxb, ppija, ppijb, nocca, noccb)
+        call sfwcal(wmo_a, wmo_b, mrsf_energies(target_state), &
+                    mo_energy_a, mo_energy_b, fa, fb, &
+                    bvec_mo_d(:,1), xk, hxb, ppija, ppijb, nocca, noccb)
 
-          ! MRSF correction: add xhxa(j,i) to W_ij (alpha closed-closed)
-          ! sfwcal returns -W, so we subtract to add before final negation
-          do ii = 1, noccb
-            do jj = 1, ii
-              wmo_a(ii,jj) = wmo_a(ii,jj) - hxa(jj,ii)
-            end do
-            wmo_a(ii,ii) = wmo_a(ii,ii) + 0.5_dp * hxa(ii,ii)
-          end do
+        ! W_AO = C * W_MO * C^T (separate alpha and beta contributions)
+        call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
+        call symmetrize_matrix(wrk2, nbf)
+        wrk2 = wrk2 * 0.5_dp
+        call pack_matrix(wrk2, wao_a)
 
-          ! Transform W_alpha: MO -> AO
-          call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
-          call symmetrize_matrix(wrk2, nbf)
-          wrk2 = wrk2 * 0.5_dp
-          call pack_matrix(wrk2, wao_a)
+        call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
+        call symmetrize_matrix(wrk2, nbf)
+        wrk2 = wrk2 * 0.5_dp
+        call pack_matrix(wrk2, wao_b)
 
-          ! Transform W_beta: MO -> AO
-          call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
-          call symmetrize_matrix(wrk2, nbf)
-          wrk2 = wrk2 * 0.5_dp
-          call pack_matrix(wrk2, wao_b)
+        wao = wao_a + wao_b
 
-          ! Total W in AO = W_alpha + W_beta
-          wao = wao_a + wao_b
-
-          deallocate(wmo_a, wmo_b, wao_a, wao_b)
-        end block
+        deallocate(wmo_a, wmo_b, wao_a, wao_b)
       else
         ! ROHF: single W matrix using mrsfrowcal
         call mrsfrowcal(wmo, mo_energy_a, fa, fb, xk, &

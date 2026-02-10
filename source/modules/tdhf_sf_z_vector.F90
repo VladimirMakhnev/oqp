@@ -88,6 +88,8 @@ contains
     real(kind=dp), pointer :: ab2(:,:,:)
     real(kind=dp), pointer :: ab1(:,:,:)
     real(kind=dp), allocatable :: fa(:,:), fb(:,:)
+    real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:)
+    real(kind=dp), allocatable :: wao_a(:), wao_b(:)
     real(kind=dp), pointer :: bvec(:,:,:)
     real(kind=dp), pointer :: wmo(:,:)
 
@@ -696,41 +698,39 @@ contains
 
     if (uhfref) then
       ! UHF: separate alpha and beta W matrices
-      block
-        real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:), wao_a(:), wao_b(:)
-        allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
-        allocate(wao_a(nbf_tri), wao_b(nbf_tri), source=0.0_dp)
+      ! W^alpha_IJ = 2*sum_a (omega - eps^beta_a)*X(I,a)*X(J,a) + H+_IJ[P]
+      ! W^beta_AB  = 2*sum_i (omega + eps^alpha_i)*X(i,A)*X(i,B)
+      ! W^alpha_IA = eps^alpha_I * Z^alpha(I,A)
+      ! W^beta_IA  = hxb(I,A) + eps^beta_I * Z^beta(I,A)
+      allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
+      allocate(wao_a(nbf_tri), wao_b(nbf_tri))
 
-        ! Compute W in MO basis using sfwcal
-        call sfwcal(wmo_a, wmo_b, sf_energies(infos%tddft%target_state), &
-                    mo_energy_a, mo_energy_b, fa, fb, &
-                    bvec_mo(:,infos%tddft%target_state), xk, &
-                    hxb, ppija, ppijb, nocca, noccb)
+      call sfwcal(wmo_a, wmo_b, sf_energies(infos%tddft%target_state), &
+                  mo_energy_a, mo_energy_b, fa, fb, &
+                  bvec_mo(:,infos%tddft%target_state), xk, &
+                  hxb, ppija, ppijb, nocca, noccb)
 
-        ! DEBUG: checkpoint 5 - after sfwcal
-        write(iw,'(A,E20.12)') '[SF_ZVEC] xk norm=', sqrt(sum(xk**2))
-        write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_a norm=', sqrt(sum(wmo_a**2))
-        write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_b norm=', sqrt(sum(wmo_b**2))
-        write(iw,'(A,E20.12)') '[SF_ZVEC] ppija norm=', sqrt(sum(ppija**2))
-        write(iw,'(A,E20.12)') '[SF_ZVEC] ppijb norm=', sqrt(sum(ppijb**2))
+      ! DEBUG: checkpoint 5 - after sfwcal
+      write(iw,'(A,E20.12)') '[SF_ZVEC] xk norm=', sqrt(sum(xk**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_a norm=', sqrt(sum(wmo_a**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_b norm=', sqrt(sum(wmo_b**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] ppija norm=', sqrt(sum(ppija**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] ppijb norm=', sqrt(sum(ppijb**2))
 
-        ! Transform W_alpha: MO -> AO, then symmetrize and pack
-        call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
-        call symmetrize_matrix(wrk2, nbf)
-        wrk2 = wrk2 * 0.5_dp
-        call pack_matrix(wrk2, wao_a)
+      ! W_AO = C * W_MO * C^T (separate alpha and beta contributions)
+      call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
+      call symmetrize_matrix(wrk2, nbf)
+      wrk2 = wrk2 * 0.5_dp
+      call pack_matrix(wrk2, wao_a)
 
-        ! Transform W_beta: MO -> AO, then symmetrize and pack
-        call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
-        call symmetrize_matrix(wrk2, nbf)
-        wrk2 = wrk2 * 0.5_dp
-        call pack_matrix(wrk2, wao_b)
+      call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
+      call symmetrize_matrix(wrk2, nbf)
+      wrk2 = wrk2 * 0.5_dp
+      call pack_matrix(wrk2, wao_b)
 
-        ! Total W in AO = W_alpha + W_beta
-        wao = wao_a + wao_b
+      wao = wao_a + wao_b
 
-        deallocate(wmo_a, wmo_b, wao_a, wao_b)
-      end block
+      deallocate(wmo_a, wmo_b, wao_a, wao_b)
     else
       ! ROHF: single W matrix using shared MO basis
       call sfrowcal(wmo,sf_energies(infos%tddft%target_state), &

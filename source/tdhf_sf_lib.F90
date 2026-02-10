@@ -962,30 +962,33 @@ contains
              wrk2(nbf,nbf), &
              source=0.0_dp)
 
-!   ----- COPY xk -----
+    ! Unpack Z-vector from 1D array xk to 2D matrix wrk1
+    ! Z has 3 blocks for ROHF: Z(closed,somo), Z(closed,virt), Z(somo,virt)
     ij = 0
-    do i = nocb+1, noca
+    do i = nocb+1, noca       ! Z_ix: closed-SOMO block
       do j = 1, nocb
         ij = ij+1
         wrk1(j,i) = xk(ij)
       end do
     end do
 
-    do i = noca+1, nbf
+    do i = noca+1, nbf        ! Z_ia: closed-virtual block
       do j = 1, nocb
         ij = ij+1
         wrk1(j,i) = xk(ij)
       end do
     end do
 
-    do k = noca+1, nbf
+    do k = noca+1, nbf        ! Z_xa: SOMO-virtual block
       do i = nocb+1, noca
         ij = ij+1
         wrk1(i,k) = xk(ij)
       end do
     end do
 
-! ! W_ix
+    ! W_ix: closed-SOMO block (i=closed, x=SOMO)
+    ! W_ix = eps_i*Z_ix + 0.5*sum_j(-F_jx*Z_ji) + 0.5*sum_a(F_ax*Z_xa)
+    !        + hxa_ix + hxb_ix + H+_ix[P]
     wrk = 0.0_dp
     do x = 1, nocb
       do k = 1, nocb
@@ -1001,7 +1004,6 @@ contains
       end do
     end do
 
-    ! W_IX = E_i * Z_ix + 0.5*F_contribution + H[X]_a + H[X]_b + H[P]
     do i = 1, nocb
       do x = 1, lr2-lr1+1
         wmo(i, lr1+x-1) = mo_energy_a(i) * wrk1(i, lr1+x-1) &
@@ -1012,7 +1014,8 @@ contains
       end do
     end do
 
-!   ----- W_IA -----
+    ! W_ia: closed-virtual block (i=closed, a=virtual)
+    ! W_ia = eps_i*Z_ia + 0.5*sum_x(F_xi*Z_xa) + hxb_ia
     wrk = 0.0_dp
     do i = 1, nocb
       do a = 1, nbf-noca
@@ -1029,7 +1032,8 @@ contains
                     + mo_energy_a(1:nocb)*wrk1(1:nocb,a)
     end do
 
-!   ----- W_XA -----
+    ! W_xa: SOMO-virtual block (x=SOMO, a=virtual)
+    ! W_xa = eps_x*Z_xa + 0.5*(sum_j F_jx*Z_ja - sum_y F_xy*Z_ya) + hxb_xa
     wrk = 0.0_dp
     do a = 1, nbf-noca
       do k = 1, nocb
@@ -1053,7 +1057,9 @@ contains
                      + mo_energy_a(lr1:lr2)*wrk1(lr1:lr2,a)
     end do
 
-!   Alpha intermediate
+    ! Alpha intermediate for W_ij/W_xy:
+    ! wrk1_ij = 2 * sum_a (omega - eps^beta_a) * X_ia * X_ja
+    ! Uses: D_ab = 2*(omega*delta_ab - F^beta_ab) for beta-virtual block
     wrk = - fb
     do i = nocb+1, nbf
         wrk(i,i) = wrk(i,i)+target_energy
@@ -1070,7 +1076,9 @@ contains
                         bvec, noca, &
                0.0_dp, wrk1, nbf)
 
-!   beta intermediate
+    ! Beta intermediate for W_xy/W_ab:
+    ! wrk_ab = 2 * sum_i (omega + eps^alpha_i) * X_ia * X_ib
+    ! Uses: D_ij = 2*(omega*delta_ij + F^alpha_ij) for alpha-occupied block
     wrk = fa
     do i = 1, noca
         wrk(i,i) = wrk(i,i)+target_energy
@@ -1086,32 +1094,37 @@ contains
                        wrk2, noca, &
                0.0_dp, wrk, nbf)
 
-  ! W_ij: DOC-DOC block
+    ! W_ij: closed-closed block
+    ! W_ij = H+_ij_alpha[P] + H+_ij_beta[P] + 2*sum_a(omega-eps^beta_a)*X_ia*X_ja
     do i = 1, nocb
       do j = 1, i
         wmo(i,j) = hppija(i,j)+hppijb(i,j)+wrk1(i,j)
       end do
     end do
 
-  ! W_xy: SOCC-SOCC block
+    ! W_xy: SOMO-SOMO block
+    ! W_xy = H+_xy_alpha[P] + 2*sum_a(omega-eps^beta_a)*X_xa*X_ya
+    !        + 2*sum_i(omega+eps^alpha_i)*X_ix*X_iy
     do x = nocb+1, noca
       do y = nocb+1, x
         wmo(x,y) = hppija(x,y)+wrk1(x,y)+wrk(x-nocb,y-nocb)
       end do
     end do
 
-  ! W_ab: VIRT-VIRT block
+    ! W_ab: virtual-virtual block
+    ! W_ab = 2*sum_i(omega+eps^alpha_i)*X_ia*X_ib
     do a = noca+1, nbf
       do b = noca+1, a
         wmo(a,b) = wrk(a-nocb,b-nocb)
       end do
     end do
 
-  ! Scale diagonal elements
+    ! Scale diagonal: W_pp*(1+delta_pp) stored as lower triangle, so halve diagonal
     do i = 1, nbf
       wmo(i,i) = wmo(i,i)*0.5_dp
     end do
 
+    ! Negate: gradient convention W -> -W
     wmo = -wmo
 
     deallocate(wrk, wrk1, wrk2)
@@ -1385,6 +1398,7 @@ contains
 
     nbf = ubound(e, 1)
 
+    ! M_ia = eps_a - eps_i  (diagonal of orbital Hessian)
     do j = nocc+1, nbf   ! virtual
       do i = 1, nocc      ! occupied
         ij = (j-nocc-1)*nocc + i
@@ -1518,7 +1532,8 @@ contains
     nbf = ubound(pa, 1)
     nconfa = nocca * nvira
 
-    ! Alpha: P_a(i,j) = Tij(i,j), P_a(i,a) = Z_a(i,a)
+    ! P^alpha_ij = T^alpha_ij = -sum_a X_ia * X_ja  (occ-occ depletion)
+    ! P^alpha_ia = Z^alpha_ia                      (occ-virt relaxation)
     pa = 0.0_dp
     pa(1:nocca, 1:nocca) = tij
     do j = 1, nvira
@@ -1528,7 +1543,8 @@ contains
       end do
     end do
 
-    ! Beta: P_b(a,b) = Tab(a,b), P_b(i,a) = Z_b(i,a)
+    ! P^beta_ab = T^beta_ab = +sum_i X_ia * X_ib   (virt-virt population)
+    ! P^beta_ia = Z^beta_ia                         (occ-virt relaxation)
     pb = 0.0_dp
     do j = 1, nvirb
       do i = 1, nvirb
@@ -1587,10 +1603,11 @@ contains
     nconfa = nocca * nvira
     lzdim = nconfa + noccb * nvirb
 
-    ! First copy (A+B)*pk part to lhs
+    ! LHS^alpha_ia = [(A+B)*pk]^alpha_ia + (eps^alpha_a - eps^alpha_i) * pk^alpha_ia
+    ! LHS^beta_ia  = [(A+B)*pk]^beta_ia  + (eps^beta_a  - eps^beta_i)  * pk^beta_ia
     lhs = 0.0_dp
 
-    ! Alpha part: lhs(1:nconfa)
+    ! Alpha: copy [(A+B)*pk]^alpha from 2D MO matrix to packed vector
     do j = 1, nvira
       do i = 1, nocca
         ij = (j-1)*nocca + i
@@ -1598,7 +1615,7 @@ contains
       end do
     end do
 
-    ! Beta part: lhs(nconfa+1:lzdim)
+    ! Beta: copy [(A+B)*pk]^beta from 2D MO matrix to packed vector
     do j = 1, nvirb
       do i = 1, noccb
         ij = nconfa + (j-1)*noccb + i
@@ -1606,7 +1623,7 @@ contains
       end do
     end do
 
-    ! Add diagonal (E_a - E_i)*pk
+    ! Add diagonal orbital energy term: (eps_a - eps_i) * pk_ia
     call sfuesum(lhs(1:nconfa), mo_energy_a, pk(1:nconfa), nocca)
     call sfuesum(lhs(nconfa+1:lzdim), mo_energy_b, pk(nconfa+1:lzdim), noccb)
 
