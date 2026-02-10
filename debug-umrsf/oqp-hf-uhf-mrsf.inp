@@ -1,0 +1,23 @@
+[input]
+system=
+ H   0.000000   0.000000   0.000000
+ F   0.000000   0.000000   0.917000
+system2=
+charge=0
+basis=6-31g*
+method=tdhf
+runtype=energy
+
+[guess]
+type=huckel
+
+[scf]
+type=uhf
+multiplicity=3
+conv=1.0e-8
+
+[tdhf]
+type=mrsf
+multiplicity=1
+nstate=5
+conv=1.0e-8

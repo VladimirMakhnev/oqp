@@ -1,0 +1,32 @@
+[input]
+system=
+ C  -0.6695   0.0000   0.0000
+ C   0.6695   0.0000   0.0000
+ H  -1.2321   0.9289   0.0000
+ H  -1.2321  -0.9289   0.0000
+ H   1.2321   0.9289   0.0000
+ H   1.2321  -0.9289   0.0000
+system2=
+charge=0
+basis=6-31g*
+method=tdhf
+runtype=grad
+
+[guess]
+type=huckel
+
+[scf]
+type=rohf
+multiplicity=3
+conv=1.0e-8
+
+[tdhf]
+type=sf
+nstate=5
+conv=1.0e-8
+spc_coco=0.0
+spc_ovov=0.0
+spc_coov=0.0
+
+[properties]
+grad=1
