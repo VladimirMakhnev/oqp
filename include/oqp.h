@@ -100,7 +100,6 @@ struct dft_parameters {
     int64_t ixcore_len;
     int64_t z_solver;
     int64_t gmres_dim;
-    bool umrsf;
 };
 
 struct control_parameters {
@@ -151,6 +150,7 @@ struct control_parameters {
     int64_t   trh_nmic;
     double    trh_gred;
     double    trh_lred;
+    bool      jacobi_rotation;
 };
 
 struct mpi_communicator {
@@ -213,11 +213,8 @@ void tdhf_sf_z_vector(struct oqp_handle_t *inf);
 void tdhf_sf_gradient(struct oqp_handle_t *inf);
 
 void tdhf_mrsf_energy(struct oqp_handle_t *inf);
-void tdhf_umrsf_energy(struct oqp_handle_t *inf);
 void tdhf_mrsf_z_vector(struct oqp_handle_t *inf);
-void tdhf_mrsf_gradient(struct oqp_handle_t *inf);
-void tdhf_umrsf_z_vector(struct oqp_handle_t *inf);   
-void tdhf_umrsf_gradient(struct oqp_handle_t *inf);   
+void tdhf_mrsf_gradient(struct oqp_handle_t *inf);   
 
 void electric_moments(struct oqp_handle_t *inf);
 void get_structures_ao_overlap(struct oqp_handle_t *inf);

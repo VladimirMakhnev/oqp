@@ -25,6 +25,7 @@ module mathlib
   end interface unpack_matrix
   public :: pack_matrix, unpack_matrix
   public :: pack_f90, unpack_f90
+  public :: jacobi_rotate_mo
 
 contains
 
@@ -506,5 +507,316 @@ contains
       call show_message("UNPACK_F77: UPLO can have only `l`, `L`, `u` or `U` value", WITH_ABORT)
     end if
   end subroutine UNPACK_F77
+
+!> @brief Jacobi pair-rotations of MO based on off-diagonal elements of S_mo (overlap matrix)
+!> @details Performs Jacobi rotations to align alpha and beta MO orbitals for UHF reference.
+!>          Called twice with isegm=0 (occupied-virtual alignment) and isegm=1 (virtual orbitals).
+!> @param[inout] mo_a       Alpha MO coefficients
+!> @param[inout] mo_b       Beta MO coefficients
+!> @param[in]    smat_full  AO overlap matrix (full, not packed)
+!> @param[in]    nocca      Number of alpha occupied orbitals
+!> @param[in]    nbf        Number of basis functions
+!> @param[inout] work1      Work array (nbf x nbf)
+!> @param[inout] work2      Work array (nbf x nbf)
+!> @param[in]    debug_mode Print debug information
+!> @author Vladimir Yu. Makhnev
+  subroutine jacobi_rotate_mo(mo_a, mo_b, smat_full, nocca, nbf, work1, work2, debug_mode)
+    use precision, only: dp
+    use io_constants, only: iw
+    use iso_c_binding, only: c_bool
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:,:) :: mo_a, mo_b
+    real(kind=dp), intent(in), dimension(:,:) :: smat_full
+    integer, intent(in) :: nocca, nbf
+    real(kind=dp), intent(inout), dimension(:,:) :: work1, work2
+    logical(c_bool), intent(in) :: debug_mode
+
+    real(kind=dp), allocatable :: s_mo(:,:)
+    integer :: nmo, ok
+
+    nmo = size(mo_a, 2)
+
+    allocate(s_mo(nbf, nbf), stat=ok)
+    if (ok /= 0) return
+
+    ! Perform Jacobi rotations for occupied-virtual alignment (isegm=0)
+    call jacobi_rotate_segment(mo_a, mo_b, smat_full, s_mo, nocca, nbf, nmo, &
+                               work1, 0, debug_mode)
+
+    ! Perform Jacobi rotations for virtual orbitals (isegm=1)
+    call jacobi_rotate_segment(mo_a, mo_b, smat_full, s_mo, nocca, nbf, nmo, &
+                               work1, 1, debug_mode)
+
+    deallocate(s_mo)
+
+  end subroutine jacobi_rotate_mo
+
+!> @brief Jacobi rotations for a specific MO segment
+!> @param[inout] mo_a       Alpha MO coefficients
+!> @param[inout] mo_b       Beta MO coefficients
+!> @param[in]    smat_full  AO overlap matrix
+!> @param[inout] s_mo       MO overlap matrix (work array)
+!> @param[in]    nocca      Number of alpha occupied orbitals
+!> @param[in]    nbf        Number of basis functions
+!> @param[in]    nmo        Number of MOs
+!> @param[inout] work       Work array
+!> @param[in]    isegm      Segment: 0=occ-vir, 1=virtual
+!> @param[in]    dgprint    Debug print flag
+  subroutine jacobi_rotate_segment(mo_a, mo_b, smat_full, s_mo, nocca, nbf, nmo, &
+                                   work, isegm, dgprint)
+    use precision, only: dp
+    use io_constants, only: iw
+    use iso_c_binding, only: c_bool
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:,:) :: mo_a, mo_b
+    real(kind=dp), intent(in), dimension(:,:) :: smat_full
+    real(kind=dp), intent(inout), dimension(:,:) :: s_mo
+    integer, intent(in) :: nocca, nbf, nmo, isegm
+    real(kind=dp), intent(inout), dimension(:,:) :: work
+    logical(c_bool), intent(in) :: dgprint
+
+    integer :: i, p, q, iterj
+    integer :: p_start, p_end, q_start
+    integer :: i_max, j_max, max_iter
+    real(kind=dp) :: max_off, thresh
+    logical :: if_conv
+    real(kind=dp), parameter :: go2ev = 27.211386245988d+00
+
+    if_conv = .false.
+    thresh = 1d-3
+
+    write(iw,'(A)') '                    ++++++++++++++++++++++++++++++++++++++++'
+    write(iw,'(A)') '                       MODULE: HF_DFT_Energy'
+    write(iw,'(A)') '                       Rotation MO orbitals (Jacobi)'
+    write(iw,'(A)') '                    ++++++++++++++++++++++++++++++++++++++++'
+    write(iw,'(A)') ''
+
+    ! Calculate overlap between alpha and beta MOs: s_mo = mo_a^T * smat_full * mo_b
+    call dgemm('t', 'n', nbf, nbf, nbf, 1.0_dp, mo_a, nbf, smat_full, nbf, 0.0_dp, work, nbf)
+    call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, work, nbf, mo_b, nbf, 0.0_dp, s_mo, nbf)
+
+    ! Normalize columns
+    do i = 1, nbf
+      s_mo(:,i) = s_mo(:,i) / max(norm2(s_mo(:,i)), 1.0e-10_dp)
+    end do
+
+    if (dgprint) then
+      write(iw,'(A)') '-----------------------------------------'
+      write(iw,'(A)') 'Diagonal elements of overlap matrix (BEFORE ROTATIONS)'
+      write(iw,'(A)') '-----------------------------------------'
+      write(iw,'(A)') '# orb.      Overlap'
+      write(iw,'(A)') '-----------------------------------------'
+      do i = 1, nmo
+         write(iw,'(I5,F12.6)') i, s_mo(i,i)
+      enddo
+      write(iw,'(A)') '-----------------------------------------'
+      write(iw,'(A)') ''
+    endif
+
+    ! Set iteration parameters based on segment
+    if (isegm == 0) then
+        p_start = nocca-1
+        p_end   = 2
+        q_start = 1
+        max_iter = 10000
+    else if (isegm == 1) then
+        p_start = nmo
+        p_end   = nocca+1
+        q_start = nocca
+        max_iter = 10000
+    else
+        write(iw, *) "WRONG ISEGM"
+        return
+    endif
+
+    ! Main iteration loop
+    do iterj = 1, max_iter
+
+        max_off = 0.0D0
+        i_max = -1
+        j_max = -1
+
+        ! Find maximum off-diagonal element
+        do p = p_start, p_end, -1
+            do q = q_start, p-1
+                if (dabs(s_mo(p,q)) > max_off) then
+                    max_off = dabs(s_mo(p,q))
+                    i_max = p
+                    j_max = q
+                endif
+                if (dabs(s_mo(q,p)) > max_off) then
+                    max_off = dabs(s_mo(q,p))
+                    i_max = q
+                    j_max = p
+                endif
+            end do
+        end do
+
+        if (dgprint) write(iw, *) "max_off", max_off, i_max, j_max
+
+        if (max_off <= thresh) then
+           write(iw,'("segment ",I1," converged at iter ",I0)') isegm, iterj
+           call flush(iw)
+           exit
+        else if (if_conv) then
+            write(iw,'("segment ",I1," reached the min theta at iter ",I0)') isegm, iterj
+            call flush(iw)
+            exit
+        end if
+
+        call jacobi_rotate_pair(mo_a, mo_b, s_mo, nmo, nbf, isegm, i_max, j_max, if_conv)
+    enddo
+
+    if (dgprint) then
+      write(iw,'(A)') '-----------------------------------------'
+      write(iw,'(A)') 'Diagonal elements of overlap matrix (AFTER ROTATIONS)'
+      write(iw,'(A)') '-----------------------------------------'
+      write(iw,'(A)') '# orb.      Overlap'
+      write(iw,'(A)') '-----------------------------------------'
+      do i = 1, nmo
+         write(iw,'(I5,F12.6)') i, s_mo(i,i)
+      enddo
+      write(iw,'(A)') '-----------------------------------------'
+    endif
+
+    ! Fix signs of orbitals
+    call jacobi_check_sign(mo_a, mo_b, smat_full, s_mo, nmo, nbf)
+
+    if (dgprint) then
+     write(iw,'(A)') '-----------------------------------------'
+     write(iw,'(A)') 'Diagonal elements of overlap matrix (FINAL/SIGN FIXED)'
+     write(iw,'(A)') '-----------------------------------------'
+     write(iw,'(A)') '# orb.      Overlap'
+     write(iw,'(A)') '-----------------------------------------'
+     do i = 1, nmo
+        write(iw,'(I5,F12.6)') i, s_mo(i,i)
+     enddo
+     write(iw,'(A)') '-----------------------------------------'
+    endif
+
+  end subroutine jacobi_rotate_segment
+
+!> @brief Rotate a pair of MOs using Jacobi rotation
+  subroutine jacobi_rotate_pair(mo_a, mo_b, s_mo, nbf, norb, isegm, i_idx, j_idx, if_conv)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:,:) :: mo_a, mo_b
+    real(kind=dp), intent(inout), dimension(:,:) :: s_mo
+    integer, intent(in) :: nbf, norb, isegm, i_idx, j_idx
+    logical, intent(inout) :: if_conv
+
+    real(kind=dp) :: tht, aa, bb, cc, dd, att, btt, cth, sth, tmp
+    integer :: k
+
+    aa = s_mo(i_idx, i_idx)
+    bb = s_mo(j_idx, j_idx)
+    cc = s_mo(i_idx, j_idx)
+    dd = s_mo(j_idx, i_idx)
+
+    att = 0.5d0 * (aa*aa + bb*bb - cc*cc - dd*dd)
+
+    if (isegm == 0) then
+        btt = aa*dd - bb*cc
+    else if (isegm == 1) then
+        btt = aa*cc - bb*dd
+    end if
+
+    tht = 0.5d0 * datan2(btt, att)
+
+    if (abs(tht) < 1.0d-4) then
+        if_conv = .true.
+        return
+    end if
+
+    cth = dcos(tht)
+    sth = dsin(tht)
+
+    if (isegm == 0) then
+        ! Rotate columns of mo_a: Givens rotation inline
+        do k = 1, norb
+            tmp = cth * mo_a(k, i_idx) + sth * mo_a(k, j_idx)
+            mo_a(k, j_idx) = cth * mo_a(k, j_idx) - sth * mo_a(k, i_idx)
+            mo_a(k, i_idx) = tmp
+        end do
+        ! Rotate rows of s_mo
+        do k = 1, nbf
+            tmp = cth * s_mo(i_idx, k) + sth * s_mo(j_idx, k)
+            s_mo(j_idx, k) = cth * s_mo(j_idx, k) - sth * s_mo(i_idx, k)
+            s_mo(i_idx, k) = tmp
+        end do
+    else
+        ! Rotate columns of mo_b: Givens rotation inline
+        do k = 1, norb
+            tmp = cth * mo_b(k, i_idx) + sth * mo_b(k, j_idx)
+            mo_b(k, j_idx) = cth * mo_b(k, j_idx) - sth * mo_b(k, i_idx)
+            mo_b(k, i_idx) = tmp
+        end do
+        ! Rotate columns of s_mo
+        do k = 1, nbf
+            tmp = cth * s_mo(k, i_idx) + sth * s_mo(k, j_idx)
+            s_mo(k, j_idx) = cth * s_mo(k, j_idx) - sth * s_mo(k, i_idx)
+            s_mo(k, i_idx) = tmp
+        end do
+    end if
+
+  end subroutine jacobi_rotate_pair
+
+!> @brief Swap sign of MO orbital
+  subroutine jacobi_swap_sign(mo_a, mo_b, nbf, norb, swa, isegm)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:,:) :: mo_a, mo_b
+    integer, intent(in) :: nbf, norb, swa, isegm
+
+    integer :: i
+
+    if (isegm == 0) then
+        do i = 1, nbf
+            mo_a(i, swa) = -mo_a(i, swa)
+        end do
+    else
+        do i = 1, nbf
+            mo_b(i, swa) = -mo_b(i, swa)
+        end do
+    end if
+
+  end subroutine jacobi_swap_sign
+
+!> @brief Check and fix signs of MO orbitals based on overlap
+  subroutine jacobi_check_sign(mo_a, mo_b, smat, s_mo, nbf, norb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:,:) :: mo_a, mo_b
+    real(kind=dp), intent(in), dimension(:,:) :: smat
+    real(kind=dp), intent(inout), dimension(:,:) :: s_mo
+    integer, intent(in) :: nbf, norb
+
+    real(kind=dp), allocatable :: sq(:,:)
+    integer :: i
+
+    ! Fix signs where diagonal overlap is negative
+    do i = 1, norb
+        if (s_mo(i,i) < 0.0d0) then
+            call jacobi_swap_sign(mo_a, mo_b, nbf, norb, i, 1)
+        end if
+    end do
+
+    ! Recompute overlap matrix
+    allocate(sq(nbf,nbf))
+    call dgemm('t', 'n', nbf, nbf, nbf, 1.0d0, mo_a, nbf, smat, nbf, 0.0d0, sq, nbf)
+    call dgemm('n', 'n', nbf, nbf, nbf, 1.0d0, sq, nbf, mo_b, nbf, 0.0d0, s_mo, nbf)
+    deallocate(sq)
+
+  end subroutine jacobi_check_sign
 
 end module

@@ -16,6 +16,34 @@ contains
   end subroutine tdhf_sf_z_vector_C
 
 
+!> @brief Solve Z-vector equation for SF-TDDFT analytical gradients
+!>
+!> This subroutine solves the coupled-perturbed equation:
+!>
+!>   (A + B) * Z = -RHS
+!>
+!> for the orbital relaxation contribution to excited-state gradients.
+!>
+!> Algorithm (preconditioned conjugate gradient):
+!>   1. Build RHS from H[T] and H[X]*X terms
+!>   2. Initialize preconditioner M = diag(epsilon_a - epsilon_i)
+!>   3. Iterate: pk -> (A+B)*pk -> update Z
+!>   4. Converge when ||residual|| < tolerance
+!>
+!> After Z-vector converges:
+!>   5. Build relaxed density P = T + Z
+!>   6. Compute H[P] response
+!>   7. Construct W matrix (energy-weighted density)
+!>
+!> Output:
+!>   - OQP_td_p: relaxed density matrices (alpha, beta)
+!>   - OQP_WAO: W matrix in AO basis for gradient
+!>
+!> Supports both UHF (separate alpha/beta) and ROHF (doc-socc-virt) references.
+!>
+!> Reference: Furche & Ahlrichs, JCP 117, 7433 (2002)
+!>            Shao, Head-Gordon, Krylov, JCP 118, 4807 (2003)
+!>
   subroutine tdhf_sf_z_vector(infos)
 
     use precision, only: dp
@@ -34,7 +62,9 @@ contains
     use tdhf_lib, only: iatogen, mntoia
     use tdhf_sf_lib, only: sfrorhs, &
       sfromcal, sfrogen, sfrolhs, pcgrbpini, &
-      pcgb, sfropcal, sfrowcal, sfdmat
+      pcgb, sfropcal, sfrowcal, sfdmat, &
+      ! UHF-specific functions
+      sfrcalc, xecalc, sfuesum, sfgen, sfpcal, sflhs, sfwcal
     use dft, only: dft_initialize, dftclean
     use mod_dft_gridint_fxc, only: utddft_fxc
     use mathlib, only: symmetrize_matrix, orthogonal_transform_sym, orthogonal_transform
@@ -58,14 +88,18 @@ contains
     real(kind=dp), pointer :: ab2(:,:,:)
     real(kind=dp), pointer :: ab1(:,:,:)
     real(kind=dp), allocatable :: fa(:,:), fb(:,:)
+    real(kind=dp), allocatable :: wmo_a(:,:), wmo_b(:,:)
+    real(kind=dp), allocatable :: wao_a(:), wao_b(:)
     real(kind=dp), pointer :: bvec(:,:,:)
     real(kind=dp), pointer :: wmo(:,:)
 
     integer :: nocca, nvira, noccb, nvirb
     integer :: nbf, nbf_tri
     integer :: iter
+    integer :: i, j, ij  ! loop indices for UHF block
     real(kind=dp) :: cnvtol, scale_exch, scale_exch2
     logical :: roref = .false.
+    logical :: uhfref = .false.   ! True for pure UHF (not ROHF)
 
     type(int2_compute_t) :: int2_driver
     class(int2_td_data_t), allocatable, target :: int2_data
@@ -90,34 +124,31 @@ contains
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: &
-      fock_a(:), mo_a(:,:), mo_energy_a(:), td_abxc(:,:), &
+      fock_a(:), mo_a(:,:), mo_energy_a(:), mo_energy_b(:), td_abxc(:,:), &
       fock_b(:), mo_b(:,:), &
       wao(:), td_p(:,:), td_t(:,:), &
       ta(:), tb(:), bvec_mo(:,:), sf_energies(:)
     character(len=*), parameter :: tags_alloc(3) = (/ character(len=80) :: &
       OQP_WAO, OQP_td_p, OQP_td_abxc /)
-    character(len=*), parameter :: tags_required(8) = (/ character(len=80) :: &
-      OQP_FOCK_A, OQP_E_MO_A, OQP_VEC_MO_A, OQP_FOCK_B, OQP_VEC_MO_B, OQP_td_bvec_mo, OQP_td_t, &
+    character(len=*), parameter :: tags_required(9) = (/ character(len=80) :: &
+      OQP_FOCK_A, OQP_E_MO_A, OQP_E_MO_B, OQP_VEC_MO_A, OQP_FOCK_B, OQP_VEC_MO_B, OQP_td_bvec_mo, OQP_td_t, &
       OQP_td_energies /)
 
     mol_mult = infos%mol_prop%mult
- !   if (.not. (mol_mult == 3 .or. mol_mult == 4)) then
- !     call show_message( &
- !       'SF-TDDFT only supports mult=3 (triplet) or mult=4 (quartet) references', &
- !       with_abort)
- !   end if 
 
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
+    if (scf_type==2) uhfref = .true.   ! Pure UHF (not constrained)
 
     dft = infos%control%hamilton == 20
 
   ! Files open
-  ! 3. LOG: Write: Main output file
     open (unit=IW, file=infos%log_filename, position="append")
-  !
-    call print_module_info('SF_TDHF_Z_Vector','Solving Z-Vector for SF-TDDFT')
-  ! Readings
+    if (uhfref) then
+      call print_module_info('SF_TDHF_Z_Vector','Solving Z-Vector for SF-TDDFT (UHF ref)')
+    else
+      call print_module_info('SF_TDHF_Z_Vector','Solving Z-Vector for SF-TDDFT (ROHF ref)')
+    end if
 
   ! Load basis set
     basis => infos%basis
@@ -137,8 +168,17 @@ contains
     noccb = infos%mol_prop%nelec_B
     nvirb = nbf-noccB
     nsocc = nocca-noccb
-    lzdim = noccb*(nsocc+nvira)+nsocc*nvira
 
+  ! Z-vector dimension depends on SCF type
+    if (uhfref) then
+      ! UHF: separate alpha and beta blocks
+      lzdim = nocca*nvira + noccb*nvirb
+    else
+      ! ROHF: doc-socc-virt structure
+      lzdim = noccb*(nsocc+nvira)+nsocc*nvira
+    end if
+
+  ! Allocate common arrays
     allocate(&
   ! for Z-vector
       xminv(lzdim), &
@@ -157,16 +197,23 @@ contains
       ppijb(noccb,noccb), &
       pa(nbf,nbf,2), &
    ! Allocate TDDFT variables
-      fa(nbf,nbf), &           ! Temporary matrix for diagonalization
-      fb(nbf,nbf), &           ! Temporary matrix for diagonalization
-      ab1_MO_a(nocca,nvirb), &
-      ab1_MO_b(noccb,nvirb), &
+      fa(nbf,nbf), &
+      fb(nbf,nbf), &
 !   For scratch
       wrk1(nbf,nbf), &
       wrk2(nbf,nbf), &
       wrk3(nbf,nbf), &
       stat=ok, &
       source=0.0_dp)
+
+  ! Allocate MO transformation arrays (different sizes for UHF vs ROHF)
+    if (uhfref) then
+      ! UHF: alpha-occ->alpha-virt, beta-occ->beta-virt
+      allocate(ab1_MO_a(nocca, nvira), ab1_MO_b(noccb, nvirb), source=0.0_dp)
+    else
+      ! ROHF: alpha-occ->beta-virt for SF excitations
+      allocate(ab1_MO_a(nocca, nvirb), ab1_MO_b(noccb, nvirb), source=0.0_dp)
+    end if
 
     if( ok/=0 ) call show_message('Cannot allocate memory', with_abort)
 
@@ -185,6 +232,7 @@ contains
     call tagarray_get_data(infos%dat, OQP_FOCK_A, fock_a)
     call tagarray_get_data(infos%dat, OQP_FOCK_B, fock_b)
     call tagarray_get_data(infos%dat, OQP_E_MO_A, mo_energy_a)
+    call tagarray_get_data(infos%dat, OQP_E_MO_B, mo_energy_b)
     call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
     call tagarray_get_data(infos%dat, OQP_VEC_MO_B, mo_b)
     call tagarray_get_data(infos%dat, OQP_td_bvec_mo, bvec_mo)
@@ -194,14 +242,22 @@ contains
     ta          => td_t(:,1)
     tb          => td_t(:,2)
 
-    ! Save unrelaxed density matrices and the `b=A*x` vector for target state
-    call sfdmat(bvec_mo(:,infos%tddft%target_state), td_abxc, mo_a, ta, tb, nocca, noccb)
+! =============================================================================
+!   STEP 1: Save unrelaxed density T and response vector (A-B)*X for target state
+!   T_ij = -X_ia*X_ja (occ-occ), T_ab = X_ia*X_ib (virt-virt)
+!   These are needed for gradient: dE/dR contains Tr[T * dH/dR]
+! =============================================================================
+    if (uhfref) then
+      call sfdmat(bvec_mo(:,infos%tddft%target_state), td_abxc, mo_a, ta, tb, nocca, noccb, mo_b)
+    else
+      call sfdmat(bvec_mo(:,infos%tddft%target_state), td_abxc, mo_a, ta, tb, nocca, noccb)
+    end if
 
   ! Initialize ERI calculations
     call int2_driver%init(basis, infos)
     call int2_driver%set_screening()
 
-    write(*,'(/1x,71("-")&
+    write(iw,'(/1x,71("-")&
              &/19x,"SF-DFT ENERGY GRADIENT CALCULATION"&
              &/1x,71("-")/)')
     write(iw,fmt='(5x,a/&
@@ -221,7 +277,7 @@ contains
     ! Fock matrices A and B
     if( roref )then
         wrk1t(1:nbf*nbf) => wrk1
-  !   Alapha
+  !   Alpha
       call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, wrk1)
       call unpack_matrix(wrk1t, fa)
 
@@ -230,18 +286,27 @@ contains
       call unpack_matrix(wrk1t, fb)
     end if
 
-  ! Make density like part
+! =============================================================================
+!   STEP 2: Compute H[T] contribution to RHS
+!   H[T]_ia = sum_jb T_jb * <ij||ab> + XC contribution
+!   This is the first term in RHS = H[T] + H[X]*X
+! =============================================================================
     call unpack_matrix(ta, pa(:,:,1))
     call unpack_matrix(tb, pa(:,:,2))
 
-  ! Initialize ERI calculations
+    ! DEBUG: pa before ERI
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pa(1) before ERI norm=', sqrt(sum(pa(:,:,1)**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pa(2) before ERI norm=', sqrt(sum(pa(:,:,2)**2))
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] pa(1:5,1,1)=', pa(1,1,1), pa(2,1,1), pa(3,1,1), pa(4,1,1), pa(5,1,1)
+
     scale_exch = 1.0_dp
     scale_exch2 = 1.0_dp
     if (dft) then
-       scale_exch = infos%dft%HFscale    !> Reference HF exchange
-       scale_exch2 = infos%tddft%HFscale !> Response HF exchange
+       scale_exch = infos%dft%HFscale    ! Reference HF exchange scaling
+       scale_exch2 = infos%tddft%HFscale ! Response HF exchange scaling
     end if
 
+    ! Compute (A+B)[T] = 2*(ij|ab) - (ia|jb) contracted with T
     int2_data = int2_tdgrd_data_t(d2=pa, &
             int_apb=.true., &
             int_amb=.false., &
@@ -255,6 +320,7 @@ contains
             mu=infos%dft%cam_mu)
     ab1 => int2_data%apb(:,:,:,1)
 
+    ! Add DFT XC kernel contribution: f_xc[T]
     pa = pa*2
     call utddft_fxc(basis=basis, &
            molGrid=molGrid, &
@@ -266,21 +332,29 @@ contains
            dxa=pa(:,:,1:1), &
            dxb=pa(:,:,2:2), &
            nmtx=1, &
-           !threshold=1.0d-15, &
            threshold=0.0d0, &
            infos=infos)
 
-!   ALPHA: AO(M,N) -> MO(IA+)
+    ! Transform H[T] from AO to MO basis: ab1_mo = C^T * ab1 * C
     call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-
     call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
-  ! Initialize ERI calculations
+    ! DEBUG: checkpoint 1 - H[T] in MO basis
+    write(iw,'(A,E20.12)') '[SF_ZVEC] ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+
+! =============================================================================
+!   STEP 3: Compute H[X]*X contribution to RHS
+!   H[X] = (A-B)[X] is the response matrix applied to excitation amplitudes
+!   hxa, hxb store the result for occ and virt blocks
+! =============================================================================
     call int2_data%clean()
     deallocate(int2_data)
+
+    ! Compute (A-B)[X] using TDA integrals (exchange only for SF)
     int2_data = int2_td_data_t(d2=bvec, &
             int_apb=.false., &
-            int_amb=.false., &
+            int_amb=.true., &
             tamm_dancoff=.true., &
             scale_exchange=scale_exch2)
 
@@ -291,55 +365,151 @@ contains
             mu=infos%tddft%cam_mu)
     ab2 => int2_data%amb(:,:,:,1)
 
-    call orthogonal_transform('n', nbf, mo_a, ab2(:,:,1), wrk2, wrk1)
+    ! Transform (A-B)[X] to MO basis
+    ! DEBUG: ab2 integral norm
+    write(iw,'(A,E20.12)') '[SF_ZVEC] ab2 norm=', sqrt(sum(ab2(:,:,1)**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] bvec_mo norm=', sqrt(sum(bvec_mo(:,infos%tddft%target_state)**2))
+    write(iw,'(A,I3)') '[SF_ZVEC] target_state=', infos%tddft%target_state
+    write(iw,'(A,I6)') '[SF_ZVEC] bvec_mo size=', size(bvec_mo,1)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] bvec_mo(1:5)=', bvec_mo(1:5,infos%tddft%target_state)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] bvec_mo(6:10)=', bvec_mo(6:10,infos%tddft%target_state)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] bvec_mo(11:15)=', bvec_mo(11:15,infos%tddft%target_state)
 
+    if (uhfref) then
+      ! UHF: mixed alpha-beta transformation (alpha_occ x beta_virt)
+      call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, ab2(:,:,1), nbf, mo_b, nbf, 0.0_dp, wrk1, nbf)
+      call dgemm('t', 'n', nbf, nbf, nbf, 1.0_dp, mo_a, nbf, wrk1, nbf, 0.0_dp, wrk2, nbf)
+    else
+      ! ROHF: symmetric transformation with alpha MOs
+      call orthogonal_transform('n', nbf, mo_a, ab2(:,:,1), wrk2, wrk1)
+    end if
+
+    ! Expand X from packed to full matrix form
     call iatogen(bvec_mo(:,infos%tddft%target_state), wrk3, nocca, noccb)
 
+    ! hxa(p,i) = 2 * sum_q H[X]_pq * X_qi  (for occupied index i)
     call dgemm('n', 't', nbf, nocca, nbf,  &
                2.0_dp, wrk2, nbf,  &
                        wrk3, nbf,  &
                0.0_dp, hxa,  nbf)
+
+    ! hxb(p,q) = 2 * X^T * H[X]  (full matrix for virtual block)
     call dgemm('t', 'n', nbf, nbf, nocca,  &
                2.0_dp, wrk2, nbf,  &
                        wrk3, nbf,  &
                0.0_dp, hxb,  nbf)
 
-!   Unrelaxed difference density matries T_ij and T_ab
-!     Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
+    ! DEBUG: checkpoint 2 - H[X]*X
+    write(iw,'(A,E20.12)') '[SF_ZVEC] hxa norm=', sqrt(sum(hxa**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] hxb norm=', sqrt(sum(hxb**2))
+
+! =============================================================================
+!   STEP 4: Build unrelaxed difference density matrices T_ij and T_ab
+!   T_ij = -sum_a X_ia * X_ja  (occupied-occupied block, electron depletion)
+!   T_ab = +sum_i X_ia * X_ib  (virtual-virtual block, electron population)
+! =============================================================================
     call dgemm('n', 't', nocca, nocca, nvirb,  &
               -1.0_dp, bvec_mo(:,infos%tddft%target_state), nocca,  &
                        bvec_mo(:,infos%tddft%target_state), nocca,  &
                0.0_dp, tij,     nocca)
 
-    ! Tb(a-,b-):= X(i+,a-)*X(i+,b-) for singlet and triplet
     call dgemm('t', 'n', nvirb, nvirb, nocca,  &
                1.0_dp, bvec_mo(:,infos%tddft%target_state), nocca,  &
                        bvec_mo(:,infos%tddft%target_state), nocca,  &
                0.0_dp, tab,     nvirb)
 
-    call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
-                 Tij, Tab, Fa, Fb, nocca, noccb)
+    ! DEBUG: checkpoint 3 - T matrices
+    write(iw,'(A,E20.12)') '[SF_ZVEC] Tij norm=', sqrt(sum(tij**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] Tab norm=', sqrt(sum(tab**2))
 
-    write(*,'(/3x,25("-")&
+! =============================================================================
+!   STEP 5: Build full RHS of Z-vector equation
+!   RHS_ia = H[T]_ia + (H[X]*X)_ia
+!   This is the right-hand side of (A+B)*Z = -RHS
+! =============================================================================
+    ! DEBUG: inputs to sfrcalc
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc hxa norm=', sqrt(sum(hxa**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] before sfrcalc hxb norm=', sqrt(sum(hxb**2))
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] ab1_mo_a(1,1:5)=', ab1_mo_a(1,1), ab1_mo_a(1,2), ab1_mo_a(1,3), ab1_mo_a(1,4), ab1_mo_a(1,5)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] hxa(nocca+1,1:5)=', hxa(nocca+1,1), hxa(nocca+1,2), hxa(nocca+1,3), hxa(nocca+1,4), hxa(nocca+1,5)
+
+    if (uhfref) then
+      call sfrcalc(rhs, ab1_mo_a, ab1_mo_b, hxa, hxb, nocca, noccb)
+    else
+      call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
+                   Tij, Tab, Fa, Fb, nocca, noccb)
+    end if
+
+    ! DEBUG: checkpoint 4 - RHS
+    write(iw,'(A,E20.12)') '[SF_ZVEC] RHS norm=', sqrt(sum(rhs**2))
+
+    write(iw,'(/3x,25("-")&
              &/6x,"START Z-VECTOR LOOP"&
              &/3x,25("-")/)')
-    call flush(iw)
 
-    call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
+! =============================================================================
+!   STEP 6: Initialize preconditioned conjugate gradient (PCG) solver
+!   Preconditioner M_ia = 1/(epsilon_a - epsilon_i) for fast convergence
+!   Initial guess: Z = M * RHS
+! =============================================================================
+    if (uhfref) then
+      ! UHF: orbital energy differences for alpha and beta blocks separately
+      call xecalc(xm(1:nocca*nvira), mo_energy_a, nocca)
+      call xecalc(xm(nocca*nvira+1:lzdim), mo_energy_b, noccb)
+      xminv = 1.0_dp / xm
+    else
+      ! ROHF: uses Fock matrix elements for doc-socc-virt structure
+      call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
+    end if
+
+    ! DEBUG: checkpoint preconditioner
+    write(iw,'(A,E20.12)') '[SF_ZVEC] xm norm=', sqrt(sum(xm**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] xminv norm=', sqrt(sum(xminv**2))
+
+    ! DEBUG: initial lhs before pcgrbpini
+    write(iw,'(A,E20.12)') '[SF_ZVEC] initial lhs norm=', sqrt(sum(lhs**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] rhs before pcgrbpini norm=', sqrt(sum(rhs**2))
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] rhs(1:5)=', rhs(1), rhs(2), rhs(3), rhs(4), rhs(5)
+    write(iw,'(A,5E15.7)') '[SF_ZVEC] xminv(1:5)=', xminv(1), xminv(2), xminv(3), xminv(4), xminv(5)
 
     call pcgrbpini(errv, pk, error, rhs, xminv, lhs)
 
-    write(*,'(" INITIAL ERROR =",3X,1P,E10.3,1X,"/",1P,E10.3)') error, cnvtol
+    ! DEBUG: pk after pcgrbpini - detailed
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pk after pcgrbpini norm=', sqrt(sum(pk**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] errv after pcgrbpini norm=', sqrt(sum(errv**2))
+    write(iw,'(A,E20.12)') '[SF_ZVEC] pk(1:5)=', pk(1), pk(2), pk(3), pk(4), pk(5)
 
-! -----------------------------------------------
+    write(iw,'(" INITIAL ERROR =",3X,1P,E10.3,1X,"/",1P,E10.3)') error, cnvtol
 
+! =============================================================================
+!   STEP 7: PCG iteration loop
+!   Each iteration: pk -> (A+B)*pk (via 2e integrals) -> update Z
+!   Converge when ||residual||^2 < tolerance
+! =============================================================================
     do iter = 1, infos%control%maxit_zv
+      ! DEBUG: CG iteration 1 - track pk
+      if (iter == 1) then
+        write(iw,'(A,E20.12)') '[SF_CG] iter1 pk norm=', sqrt(sum(pk**2))
+      endif
 
-      call sfrogen(wrk1, wrk2, pk, nocca, noccb)
-!     Alpha
-      call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
-!     Beta
-      call orthogonal_transform('t', nbf, mo_b, wrk2, pa(:,:,2), wrk3)
+      if (uhfref) then
+        ! UHF: convert Z-vector to AO for alpha and beta separately
+        ! Alpha: pk(1:nocca*nvira) -> pa(:,:,1)
+        call sfgen(wrk1, pk(1:nocca*nvira), nocca, nbf)
+        call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
+        ! Beta: pk(nocca*nvira+1:lzdim) -> pa(:,:,2)
+        call sfgen(wrk2, pk(nocca*nvira+1:lzdim), noccb, nbf)
+        call orthogonal_transform('t', nbf, mo_b, wrk2, pa(:,:,2), wrk3)
+      else
+        ! ROHF: doc-socc-virt structure
+        call sfrogen(wrk1, wrk2, pk, nocca, noccb)
+!       Alpha
+        call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
+!       Beta
+        call orthogonal_transform('t', nbf, mo_b, wrk2, pa(:,:,2), wrk3)
+      end if
 
 !     (A+B)*PK
       call int2_data%clean()
@@ -374,13 +544,41 @@ contains
              threshold=0.0d0, &
              infos=infos)
 
-!     ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
-      call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+      if (uhfref) then
+        ! UHF: AO -> MO transformation for alpha and beta
+        ! Alpha: (nocca, nvira)
+        call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+        ! Beta: (noccb, nvirb)
+        call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
 
-      call mntoia(ab1(:,:,2), ab1_mo_b, mo_a, mo_a, noccb, noccb)
+        ! DEBUG: CG iteration 1 - inputs to sflhs
+        if (iter == 1) then
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 pa(1) norm=', sqrt(sum(pa(:,:,1)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 pa(2) norm=', sqrt(sum(pa(:,:,2)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1(:,:,1) norm=', sqrt(sum(ab1(:,:,1)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1(:,:,2) norm=', sqrt(sum(ab1(:,:,2)**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1_mo_a norm=', sqrt(sum(ab1_mo_a**2))
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 ab1_mo_b norm=', sqrt(sum(ab1_mo_b**2))
+        endif
 
-      call sfrolhs(lhs, pk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
-                   nocca, noccb)
+        ! UHF: LHS = (A+B)*pk + (E_a - E_i)*pk
+        call sflhs(lhs, pk, mo_energy_a, mo_energy_b, ab1_mo_a, ab1_mo_b, &
+                   nocca, noccb, nvira, nvirb)
+
+        ! DEBUG: CG iteration 1 - output from sflhs
+        if (iter == 1) then
+          write(iw,'(A,E20.12)') '[SF_CG] iter1 lhs norm=', sqrt(sum(lhs**2))
+        endif
+      else
+        ! ROHF: doc-socc-virt structure
+!       ALPHA: AO(M,N) -> MO(IA+) ... LPTMOA
+        call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+
+        call mntoia(ab1(:,:,2), ab1_mo_b, mo_a, mo_a, noccb, noccb)
+
+        call sfrolhs(lhs, pk, mo_energy_a, fa, fb, ab1_mo_a, ab1_mo_b, &
+                     nocca, noccb)
+      end if
 
       alpha = 1.0_dp/dot_product(pk, lhs)
 
@@ -388,9 +586,8 @@ contains
       errv = errv - alpha*lhs
 
       error = dot_product(errv, errv)
-      write(*,'(" ITER#",I2," ERROR =",3X,1P,E10.3,1X,"/",1P,E10.3)') &
+      write(iw,'(" ITER#",I2," ERROR =",3X,1P,E10.3,1X,"/",1P,E10.3)') &
         iter, error, cnvtol
-      call flush(iw)
 
       if (error<cnvtol) exit
 
@@ -402,26 +599,38 @@ contains
 ! -----------------------------------------------
     if (error>cnvtol) then
        infos%mol_energy%Z_Vector_converged=.false.
-       write(*,'(/3x,24("-")&
+       write(iw,'(/3x,24("-")&
              &/6x,"Z-Vector not converged"&
              &/3x,24("-")/)')
     else
        infos%mol_energy%Z_Vector_converged=.true.
-       write(*,'(/3x,24("-")&
+       write(iw,'(/3x,24("-")&
              &/6x,"Z-Vector converged"&
              &/3x,24("-")/)')
     endif
 
     call flush(iw)
 
-    call sfropcal(wrk1, wrk2, tij, tab, xk, nocca, noccb)
+! =============================================================================
+!   STEP 8: Construct relaxed density matrix P = T + Z
+!   P contains both unrelaxed (T) and orbital relaxation (Z) contributions
+!   Used for: gradient = Tr[P * dH/dR] + Tr[W * dS/dR] + 2e terms
+! =============================================================================
+    if (uhfref) then
+      call sfpcal(wrk1, wrk2, tij, tab, xk, nocca, noccb, nvira, nvirb)
+    else
+      call sfropcal(wrk1, wrk2, tij, tab, xk, nocca, noccb)
+    end if
 
- !  Update density for alpha
+    ! Transform P from MO to AO basis: P_AO = C * P_MO * C^T
     call orthogonal_transform('t', nbf, mo_a, wrk1, pa(:,:,1), wrk3)
-
- !  Update density for beta
     call orthogonal_transform('t', nbf, mo_b, wrk2, pa(:,:,2), wrk3)
 
+! =============================================================================
+!   STEP 9: Compute H[P] response for W matrix construction
+!   H[P]_ij = sum_kl P_kl * <ik||jl> + XC contribution
+!   This enters the energy-weighted density W_ij
+! =============================================================================
     call int2_data%clean()
     deallocate(int2_data)
     int2_data = int2_tdgrd_data_t(d2=pa, &
@@ -435,12 +644,14 @@ contains
             mu=infos%dft%cam_mu)
     ab1 => int2_data%apb(:,:,:,1)
 
+    ! Save relaxed density to output array (symmetrized and packed)
     call symmetrize_matrix(pa(:,:,1), nbf)
     call symmetrize_matrix(pa(:,:,2), nbf)
     call pack_matrix(pa(:,:,1), td_p(:,1))
     call pack_matrix(pa(:,:,2), td_p(:,2))
     td_p = 0.5_dp*td_p
 
+    ! Add DFT XC kernel contribution to H[P]
     call utddft_fxc(basis=basis, &
            molGrid=molGrid, &
            isVecs=.true., &
@@ -451,11 +662,11 @@ contains
            dxa=pa(:,:,1:1), &
            dxb=pa(:,:,2:2), &
            nmtx=1, &
-           !threshold=1.0d-15, &
            threshold=0.0d0, &
            infos=infos)
 
-!   ALPHA AO(M,N) -> MO(I-,J-) ... LPPIJA
+    ! Transform H[P] to MO basis: ppij = C^T * H[P] * C (occ-occ block)
+    ! ppija_ij = H[P]_ij for alpha occupied orbitals
     call dgemm('n', 'n', nbf, nocca, nbf,  &
                1.0_dp, ab1(:,:,1), nbf,  &
                        mo_a, nbf,  &
@@ -464,30 +675,75 @@ contains
                1.0_dp, mo_a,  nbf,  &
                        wrk2,  nbf,  &
                0.0_dp, ppija, nocca)
-!   BETA: AO(M,N) -> MO(I-,J-) ... LPPIJB
+
+    ! ppijb_ij = H[P]_ij for beta occupied orbitals
     call dgemm('n', 'n', nbf, noccb, nbf,  &
                1.0_dp, ab1(:,:,2), nbf,  &
-                       mo_a, nbf,  &
+                       mo_b, nbf,  &
                0.0_dp, wrk2, nbf)
     call dgemm('t', 'n', noccb, noccb, nbf,  &
-               1.0_dp, mo_a,  nbf,  &
+               1.0_dp, mo_b,  nbf,  &
                        wrk2,  nbf,  &
                0.0_dp, ppijb, noccb)
 
-!   Calculate W (in MO basis)
+! =============================================================================
+!   STEP 10: Compute energy-weighted density matrix W
+!   W enforces orbital orthonormality: dE/dR += sum_pq W_pq * dS_pq/dR
+!   W_ij contains occupied orbital contributions
+!   W_ab contains virtual orbital contributions
+!   W_ia contains occ-virt coupling from Z-vector
+! =============================================================================
     wmo => wrk3
     wmo = 0
-    call sfrowcal(wmo,sf_energies(infos%tddft%target_state), &
-                  mo_energy_a, fa, fb, bvec_mo(:,infos%tddft%target_state), xk, &
-                  hxa, hxb, ppija, ppijb, &
-                  nocca, noccb)
 
-    call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
-    call symmetrize_matrix(wrk2, nbf)
-    call pack_matrix(wrk2, wao)
-    wao = wao*0.5_dp
-!   ROHF, half one more time:
-    wao = wao*0.5_dp
+    if (uhfref) then
+      ! UHF: separate alpha and beta W matrices
+      ! W^alpha_IJ = 2*sum_a (omega - eps^beta_a)*X(I,a)*X(J,a) + H+_IJ[P]
+      ! W^beta_AB  = 2*sum_i (omega + eps^alpha_i)*X(i,A)*X(i,B)
+      ! W^alpha_IA = eps^alpha_I * Z^alpha(I,A)
+      ! W^beta_IA  = hxb(I,A) + eps^beta_I * Z^beta(I,A)
+      allocate(wmo_a(nbf,nbf), wmo_b(nbf,nbf), source=0.0_dp)
+      allocate(wao_a(nbf_tri), wao_b(nbf_tri))
+
+      call sfwcal(wmo_a, wmo_b, sf_energies(infos%tddft%target_state), &
+                  mo_energy_a, mo_energy_b, fa, fb, &
+                  bvec_mo(:,infos%tddft%target_state), xk, &
+                  hxb, ppija, ppijb, nocca, noccb)
+
+      ! DEBUG: checkpoint 5 - after sfwcal
+      write(iw,'(A,E20.12)') '[SF_ZVEC] xk norm=', sqrt(sum(xk**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_a norm=', sqrt(sum(wmo_a**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] wmo_b norm=', sqrt(sum(wmo_b**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] ppija norm=', sqrt(sum(ppija**2))
+      write(iw,'(A,E20.12)') '[SF_ZVEC] ppijb norm=', sqrt(sum(ppijb**2))
+
+      ! W_AO = C * W_MO * C^T (separate alpha and beta contributions)
+      call orthogonal_transform('t', nbf, mo_a, wmo_a, wrk2, wrk1)
+      call symmetrize_matrix(wrk2, nbf)
+      wrk2 = wrk2 * 0.5_dp
+      call pack_matrix(wrk2, wao_a)
+
+      call orthogonal_transform('t', nbf, mo_b, wmo_b, wrk2, wrk1)
+      call symmetrize_matrix(wrk2, nbf)
+      wrk2 = wrk2 * 0.5_dp
+      call pack_matrix(wrk2, wao_b)
+
+      wao = wao_a + wao_b
+
+      deallocate(wmo_a, wmo_b, wao_a, wao_b)
+    else
+      ! ROHF: single W matrix using shared MO basis
+      call sfrowcal(wmo,sf_energies(infos%tddft%target_state), &
+                    mo_energy_a, mo_energy_b, fa, fb, bvec_mo(:,infos%tddft%target_state), xk, &
+                    hxa, hxb, ppija, ppijb, &
+                    nocca, noccb)
+
+      ! Transform W: MO -> AO, then symmetrize and pack
+      call orthogonal_transform('t', nbf, mo_a, wmo, wrk2, wrk1)
+      call symmetrize_matrix(wrk2, nbf)
+      wrk2 = wrk2 * 0.5_dp
+      call pack_matrix(wrk2, wao)
+    end if
 
     call int2_driver%clean()
 

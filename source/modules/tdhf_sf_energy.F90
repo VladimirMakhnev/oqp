@@ -15,6 +15,30 @@ contains
     call tdhf_sf_energy(inf)
   end subroutine tdhf_sf_energy_C
 
+
+!> @brief Compute SF-TDDFT excitation energies using Davidson diagonalization
+!>
+!> Solves the non-Hermitian eigenvalue problem in Tamm-Dancoff approximation:
+!>
+!>   A * X = omega * X
+!>
+!> where A is the response matrix and X are excitation amplitudes (alpha->beta).
+!>
+!> Algorithm:
+!>   1. Generate initial guess vectors from orbital energy differences
+!>   2. Build A*X via 2e integrals (exchange-type for SF)
+!>   3. Add orbital energy contribution: (epsilon_a - epsilon_i) * X
+!>   4. Build reduced A matrix and diagonalize
+!>   5. Form residuals and check convergence
+!>   6. Expand subspace with preconditioned residuals
+!>   7. Repeat until converged
+!>
+!> Output:
+!>   - sf_energies: excitation energies for nstates
+!>   - bvec_mo: excitation amplitudes X_ia (alpha_occ -> beta_virt)
+!>
+!> Reference: Shao, Head-Gordon, Krylov, JCP 118, 4807 (2003)
+!>
   subroutine tdhf_sf_energy(infos)
     use io_constants, only: iw
     use oqp_tagarray_driver
@@ -79,6 +103,7 @@ contains
     real(kind=dp) :: mxerr, cnvtol, scale_exch
     integer :: maxvec, target_state
     logical :: roref = .false.
+    logical :: uhfref = .false.
 
     type(int2_compute_t) :: int2_driver
     type(int2_td_data_t), target :: int2_data
@@ -106,6 +131,7 @@ contains
     
     scf_type = infos%control%scftype
     if (scf_type==3) roref = .true.
+    if (scf_type==2) uhfref = .true.
 
     dft = infos%control%hamilton == 20
 
@@ -113,7 +139,11 @@ contains
   ! 3. LOG: Write: Main output file
     open (unit=IW, file=infos%log_filename, position="append")
   !
-    call print_module_info('SF_TDHF_Energy','Computing Energy of SF-TDDFT')
+    if (uhfref) then
+      call print_module_info('SF_TDHF_Energy','Computing Energy of SF-TDDFT (UHF ref)')
+    else
+      call print_module_info('SF_TDHF_Energy','Computing Energy of SF-TDDFT (ROHF ref)')
+    end if
   ! Readings
 
   ! Load basis set
@@ -145,7 +175,7 @@ contains
     mxvec = min(maxvec*nstates, xvec_dim)
     nstates = min(nstates, mxvec)
     nvec = nstates
-    nvec = min(max(2*nstates, 5), mxvec)
+    nvec = min(max(2*nstates, 20), mxvec)
     nmax = nvec
 
     call infos%dat%remove_records(tags_alloc)
@@ -196,8 +226,14 @@ contains
     if (ok /= 0) call show_message('Cannot allocate memory', WITH_ABORT)
 
     scale_exch = 1.0_dp
-    if (infos%tddft%HFscale == -1.0_dp) &
-          infos%tddft%HFscale = infos%dft%HFscale
+    if (infos%tddft%HFscale == -1.0_dp) then
+      if (infos%dft%HFscale >= 0.0_dp) then
+        infos%tddft%HFscale = infos%dft%HFscale
+      else
+        ! Pure HF: full exact exchange
+        infos%tddft%HFscale = 1.0_dp
+      end if
+    end if
 
     if (infos%dft%cam_flag) then
       if (infos%tddft%cam_alpha == -1.0_dp) &
@@ -244,23 +280,30 @@ contains
     ta          => td_t(:,1)
     tb          => td_t(:,2)
 
-  ! Initialize ERI calculations
+! =============================================================================
+!   Initialize two-electron integral engine
+! =============================================================================
     call int2_driver%init(basis, infos)
     call int2_driver%set_screening()
 
-  ! Prepare for ROHF
+! =============================================================================
+!   For ROHF: transform Fock matrices to MO basis
+!   F_MO = C^T * F_AO * C
+!   Needed for orbital energy contribution in ROHF case
+! =============================================================================
     if( roref )then
       scr1t(1:nbf*nbf) => scr1(:,:)
-  !   Alpha
       call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, scr1)
       call unpack_matrix(scr1t,fa)
-
-  !   Beta
       call orthogonal_transform_sym(nbf, nbf, fock_b, mo_b, nbf, scr1)
       call unpack_matrix(scr1t,fb)
     end if
 
-  ! Construct TD trial vector
+! =============================================================================
+!   Generate initial guess vectors
+!   Based on lowest orbital energy differences: omega_ia = epsilon_a - epsilon_i
+!   xm stores preconditioner: M_ia = 1/(epsilon_a - epsilon_i)
+! =============================================================================
     call inivec(mo_energy_a,mo_energy_b,bvec_mo,xm, &
                 nocca,noccb,nvec)
 
@@ -271,9 +314,15 @@ contains
     mxiter = infos%control%maxit_dav
     ierr = 0
 
+! =============================================================================
+!   Davidson diagonalization loop
+!   Iteratively builds and diagonalizes reduced A matrix
+! =============================================================================
     do iter = 1, mxiter
       nv = iend-ist+1
 
+      ! ----- Transform trial vectors from MO to AO basis -----
+      ! bvec_AO = C_alpha * X_MO * C_beta^T
       do ivec = ist, iend
         iv = ivec-ist+1
         call iatogen(bvec_mo(:,ivec),abxc,nocca,noccb)
@@ -285,6 +334,8 @@ contains
                    0.0_dp,bvec(1,1,iv),nbf)
       end do
 
+      ! ----- Compute A*X via 2e integrals (exchange-type for SF) -----
+      ! In TDA: A_ia,jb = delta_ij*delta_ab*(e_a - e_i) - (ia|jb)
       int2_data = int2_td_data_t(d2=bvec(:,:,:nv), &
               int_apb=.false., int_amb=.false., tamm_dancoff=.true., &
               scale_exchange=scale_exch)
@@ -296,28 +347,31 @@ contains
               mu=infos%tddft%cam_mu)
       ab2 => int2_data%amb(:,:,:,1)
 
+      ! ----- Transform A*X back to MO basis and add orbital energies -----
       do ivec = ist, iend
         iv = ivec-ist+1
-  !     Product (A-B)*X
         call mntoia(ab2(:,:,iv),ab2_mo(:,ivec),mo_a,mo_b,nocca,noccb)
-        if (roref) then
-          call iatogen(bvec_mo(:,ivec),abxc,nocca,noccb)
 
-          ! faz
+        if (roref) then
+          ! ROHF: use Fock matrices for orbital energy contribution
+          ! (A*X)_ia += F_alpha*X - X*F_beta
+          call iatogen(bvec_mo(:,ivec),abxc,nocca,noccb)
           call dgemm('n','n',nocca,nbf,nocca, &
                      1.0_dp,fa,nbf,abxc,nbf, &
                      0.0_dp,scr1,nbf)
-          ! zfb - faz
           call dgemm('n','n',nocca,nbf,nbf, &
                      1.0_dp,abxc,nbf,fb,nbf, &
                     -1.0_dp,scr1,nbf)
-
           call sfroesum(scr1,ab2_mo,nocca,noccb,ivec)
         else
+          ! UHF: use orbital energies directly
+          ! (A*X)_ia += (epsilon_a - epsilon_i) * X_ia
           call sfesum(mo_energy_a,mo_energy_b,ab2_mo,bvec_mo,nocca,noccb,ivec)
         endif
       end do
 
+      ! ----- Build and diagonalize reduced A matrix -----
+      ! A_red = X^T * (A*X), solve A_red * c = omega * c
       vl_p(1:nvec, 1:nvec) => vl(1:nvec*nvec)
       vr_p(1:nvec, 1:nvec) => vr(1:nvec*nvec)
       call rparedms(bvec_mo,ab2_mo,ab2_mo,apb,amb,nvec,tamm_dancoff=.true.)
@@ -326,25 +380,29 @@ contains
 
       call rpaechk(eex,nvec,nstates,imax,tamm_dancoff=.true.)
 
+      ! ----- Compute residuals: r = A*X*c - omega*X*c -----
       for_trnsf_b_vec = vr_p
       call sfresvec(scr3,bvec_mo,ab2_mo,vr_p,eex,nvec,rnorm,nstates)
+
+      ! ----- Precondition residuals: q = M * r -----
+      ! M_ia = 1/(epsilon_a - epsilon_i - omega)
       call sfqvec(scr3,xm,eex,nstates)
 
       call rpaprint(eex, rnorm, cnvtol, iter, imax, nstates, do_neg=.true.)
 
       mxerr = maxval(rnorm)
 
-!     Check convergence
+      ! Check convergence
       converged = mxerr<=cnvtol
       if (converged) exit
 
-!     No space left for new vectors, exit
+      ! No space left for new vectors
       if (nvec==mxvec) ierr = 1
       if (ierr/=0) exit
 
+      ! ----- Orthogonalize and add new vectors to subspace -----
       call rpanewb(nstates,bvec_mo,scr3,novec,nvec,ierr,tamm_dancoff=.true.)
 
-  !   ierr=1 nvec over mxvec: not converged case
       if (ierr/=0) exit
 
       ist = novec+1
@@ -374,21 +432,37 @@ contains
     end select
     call flush(iw)
 
+! =============================================================================
+!   Post-convergence: transform eigenvectors and compute properties
+! =============================================================================
+
+    ! Transform trial vectors to final eigenvectors: X_final = X_trial * c
     call trfrmb(bvec_mo,for_trnsf_b_vec,nvec,nstates)
 
+    ! Compute transition density matrices for oscillator strengths
+    ! T_mn = sum_ia X_ia * C_mi * C_na
     call get_transition_density(trden, bvec_mo, nbf, noccb, nocca, nstates)
 
+    ! Compute transition dipole moments
     call get_transition_dipole(basis, dip, mo_a, trden, nstates)
 
+    ! Compute <S^2> for each state to characterize spin contamination
+    ! For SF: ideal singlet has <S^2>=0, triplet has <S^2>=2
     do ist = 1, nstates
-      call sfdmat(bvec_mo(:,ist),abxc,mo_a,ta,tb,nocca,noccb)
+      if (uhfref) then
+        call sfdmat(bvec_mo(:,ist),abxc,mo_a,ta,tb,nocca,noccb,mo_b)
+      else
+        call sfdmat(bvec_mo(:,ist),abxc,mo_a,ta,tb,nocca,noccb)
+      end if
       spin_square(ist) = get_spin_square(dmat_a,dmat_b,ta,tb,abxc,Smat,noccb,nocca)
     end do
 
+    ! Get orbital transition labels (i->a pairs)
     call get_transitions(trans, nocca, noccb, nbf)
 
     write(*,'(2x,35("="),/,2x,"Alpha -> Beta spin-flip excitations",/,2x,35("="))')
 
+    ! Save results to output arrays
     sf_energies = eex(:nstates)
     bvec_mo_out = bvec_mo(:,:nstates)
     infos%mol_energy%excited_energy = sf_energies(infos%tddft%target_state)

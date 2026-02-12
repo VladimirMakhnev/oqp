@@ -151,16 +151,18 @@ contains
   end subroutine trfrmb
 
   subroutine sfdmat(bvec,abxc,mo_a,ta,tb, &
-                    noca,nocb)
+                    noca,nocb,mo_b)
     use precision, only: dp
     use tdhf_lib, only: iatogen
     use mathlib, only: pack_matrix
     use mathlib, only: orthogonal_transform
+    use io_constants, only: iw
 
     implicit none
 
     real(kind=dp), intent(in), dimension(:) :: bvec
     real(kind=dp), intent(in), dimension(:,:) :: mo_a
+    real(kind=dp), intent(in), dimension(:,:), optional :: mo_b
     real(kind=dp), intent(inout), dimension(:,:) :: abxc
     real(kind=dp), intent(out), dimension(:) :: ta, tb
     integer, intent(in) :: noca, nocb
@@ -179,7 +181,16 @@ contains
     nvirb = nbf-nocb
 
     call iatogen(bvec,scr1,noca,nocb)
-    call orthogonal_transform('t', nbf, mo_a, scr1, abxc, scr2)
+
+    ! Transform X from MO to AO basis
+    ! For UHF: X_AO = mo_a * X_MO * mo_b^T (asymmetric transformation)
+    ! For RHF/ROHF: X_AO = mo_a * X_MO * mo_a^T (symmetric transformation)
+    if (present(mo_b)) then
+      call dgemm('n', 'n', nbf, nbf, nbf, 1.0_dp, mo_a, nbf, scr1, nbf, 0.0_dp, scr2, nbf)
+      call dgemm('n', 't', nbf, nbf, nbf, 1.0_dp, scr2, nbf, mo_b, nbf, 0.0_dp, abxc, nbf)
+    else
+      call orthogonal_transform('t', nbf, mo_a, scr1, abxc, scr2)
+    end if
 
   ! Unrelaxed difference density matrix -----
 
@@ -206,14 +217,26 @@ contains
                0.0_dp,scr1,nvirb)
 
   ! MO(A-,B-) -> AO(M,N)
-    call dgemm('n','n',nbf,nvirb,nvirb, &
-               1.0_dp,mo_a(:,nocb+1:),nbf, &
-                      scr1,nvirb, &
-               0.0_dp,scr2,nbf)
-    call dgemm('n','t',nbf,nbf,nvirb, &
-               1.0_dp,scr2,nbf, &
-                      mo_a(:,nocb+1:),nbf, &
-               0.0_dp,scr1,nbf)
+  ! For UHF: use beta MO coefficients for virtual-virtual block
+    if (present(mo_b)) then
+      call dgemm('n','n',nbf,nvirb,nvirb, &
+                 1.0_dp,mo_b(:,nocb+1:),nbf, &
+                        scr1,nvirb, &
+                 0.0_dp,scr2,nbf)
+      call dgemm('n','t',nbf,nbf,nvirb, &
+                 1.0_dp,scr2,nbf, &
+                        mo_b(:,nocb+1:),nbf, &
+                 0.0_dp,scr1,nbf)
+    else
+      call dgemm('n','n',nbf,nvirb,nvirb, &
+                 1.0_dp,mo_a(:,nocb+1:),nbf, &
+                        scr1,nvirb, &
+                 0.0_dp,scr2,nbf)
+      call dgemm('n','t',nbf,nbf,nvirb, &
+                 1.0_dp,scr2,nbf, &
+                        mo_a(:,nocb+1:),nbf, &
+                 0.0_dp,scr1,nbf)
+    end if
     call pack_matrix(scr1,tb)
 
     deallocate(scr1,scr2)
@@ -331,6 +354,37 @@ contains
 
   end subroutine print_results
 
+!> @brief Compute RHS of Z-vector equation for ROHF SF-TDDFT
+!>
+!> ROHF uses a three-block orbital structure:
+!>   - DOC: doubly occupied (1:nocb)
+!>   - SOCC: singly occupied (nocb+1:noca)
+!>   - VIRT: virtual (noca+1:nbf)
+!>
+!> The Z-vector dimension is: lzdim = nocb*(nsocc+nvir) + nsocc*nvir
+!>
+!> RHS formula (adapted from Furche & Ahlrichs, JCP 117, 7433, 2002):
+!>
+!>   RHS = H[T] + H[X]*X + Fock contributions
+!>
+!> The RHS is assembled in three blocks:
+!>   1. DOC-SOCC:  R(i,x) = HPTB + XHXA - XHXA^T - XHXB
+!>   2. DOC-VIRT:  R(i,a) = HPTA + HPTB + XHXA - XHXB
+!>   3. SOCC-VIRT: R(x,a) = HPTA + XHXA + XHXB - XHXB^T
+!>
+!> where i=DOC, x=SOCC, a=VIRT indices.
+!>
+!> @param[out]   rhs   RHS vector, dimension (lzdim)
+!> @param[inout] xhxa  H[X]*X alpha, modified with Fock contribution
+!> @param[inout] xhxb  H[X]*X beta, modified with Fock contribution
+!> @param[in]    hpta  H[T] alpha (nocb, nvir)
+!> @param[in]    hptb  H[T] beta (nocb, nvirb)
+!> @param[in]    tij   Unrelaxed occ-occ density
+!> @param[in]    tab   Unrelaxed virt-virt density
+!> @param[in]    fa    Alpha Fock matrix in MO basis
+!> @param[in]    fb    Beta Fock matrix in MO basis
+!> @param[in]    noca  Number of alpha occupied (DOC + SOCC)
+!> @param[in]    nocb  Number of beta occupied (DOC only)
   subroutine sfrorhs(rhs,xhxa,xhxb,hpta,hptb,Tij,Tab,Fa,Fb, &
                      noca,nocb)
     use precision, only: dp
@@ -409,6 +463,27 @@ contains
 
   end subroutine sfrorhs
 
+!> @brief Compute preconditioner for ROHF SF Z-vector iteration
+!>
+!> The preconditioner approximates the diagonal of (A+B) for ROHF.
+!> Uses Fock matrix elements for SOCC blocks (open-shell coupling).
+!>
+!> Three blocks with different formulas:
+!>   DOC-SOCC:  M(i,x) = 0.5 * [F_b(x,x) - F_b(i,i)]
+!>   DOC-VIRT:  M(i,a) = epsilon_a - epsilon_i
+!>   SOCC-VIRT: M(x,a) = 0.5 * [F_a(a,a) - F_a(x,x)]
+!>
+!> where i=DOC, x=SOCC, a=VIRT.
+!>
+!> The 0.5 factors account for the half-electron occupation in SOCC.
+!>
+!> @param[out] xm     Preconditioner M_ia, dimension (lzdim)
+!> @param[out] xminv  Inverse preconditioner 1/M_ia
+!> @param[in]  energy Orbital energies
+!> @param[in]  fa     Alpha Fock matrix in MO basis
+!> @param[in]  fb     Beta Fock matrix in MO basis
+!> @param[in]  noca   Number of alpha occupied
+!> @param[in]  nocb   Number of beta occupied
   subroutine sfromcal(xm,xminv,energy,fa,fb,noca,nocb)
     use precision, only: dp
 
@@ -460,6 +535,24 @@ contains
 
   end subroutine sfromcal
 
+!> @brief Unpack Z-vector to alpha/beta MO matrices for ROHF
+!>
+!> Converts packed Z-vector pv to matrix form for alpha and beta:
+!>   ava(i,a) = Z_alpha(i,a) in MO basis
+!>   avb(i,a) = Z_beta(i,a) in MO basis
+!>
+!> The unpacking follows ROHF doc-socc-virt structure:
+!>   1. DOC-SOCC:  avb(j,i) = pv  for j=1:nocb, i=nocb+1:noca
+!>   2. DOC-VIRT:  ava(j,k) = avb(j,k) = pv  for j=1:nocb, k=noca+1:nbf
+!>   3. SOCC-VIRT: ava(i,k) = pv  for i=nocb+1:noca, k=noca+1:nbf
+!>
+!> Note: DOC-VIRT block contributes to BOTH alpha and beta.
+!>
+!> @param[out] ava   Alpha Z in MO matrix form (nbf, nbf)
+!> @param[out] avb   Beta Z in MO matrix form (nbf, nbf)
+!> @param[in]  pv    Packed Z-vector (lzdim)
+!> @param[in]  noca  Number of alpha occupied
+!> @param[in]  nocb  Number of beta occupied
   subroutine sfrogen(ava,avb,pv,noca,nocb)
     use precision, only: dp
 
@@ -505,6 +598,34 @@ contains
 
   end subroutine sfrogen
 
+!> @brief Compute LHS of Z-vector equation for ROHF SF-TDDFT
+!>
+!> Evaluates: LHS = (A+B)*Z + diagonal terms
+!>
+!> For ROHF with doc-socc-virt structure, the formula is complex due to
+!> open-shell coupling. Three blocks:
+!>
+!>   DOC-SOCC block:
+!>     LHS(j,x) = (E_x - E_j)*Z(j,x) + 0.5*[H[Z]_b + Fock terms]
+!>
+!>   DOC-VIRT block:
+!>     LHS(j,a) = (E_a - E_j)*Z(j,a) + 0.5*[H[Z]_a + H[Z]_b + Fock terms]
+!>
+!>   SOCC-VIRT block:
+!>     LHS(x,a) = (E_a - E_x)*Z(x,a) + 0.5*[H[Z]_a + Fock terms]
+!>
+!> where j=DOC, x=SOCC, a=VIRT indices.
+!>
+!> The 0.5 factors and cross-terms arise from ROHF orbital structure.
+!>
+!> @param[out] pmo    LHS vector (lzdim)
+!> @param[in]  z      Current Z-vector iterate
+!> @param[in]  e      Orbital energies
+!> @param[in]  fa, fb Fock matrices in MO basis
+!> @param[in]  hpza   (A+B)*Z alpha part
+!> @param[in]  hpzb   (A+B)*Z beta part
+!> @param[in]  noca   Number of alpha occupied
+!> @param[in]  nocb   Number of beta occupied
   subroutine sfrolhs(pmo, z, e, fa, fb, hpza, hpzb,  &
                      noca, nocb)
     use precision, only: dp
@@ -690,6 +811,31 @@ contains
 
   end subroutine pcgb
 
+!> @brief Construct relaxed density P = T + Z for ROHF SF-TDDFT
+!>
+!> Builds alpha and beta density matrices from unrelaxed T and Z-vector.
+!>
+!> Density structure (P = T + 0.5*Z for ROHF):
+!>
+!>   Alpha:
+!>     P_a(i,j) = T_a(i,j)           for i,j = 1:noca (occ-occ)
+!>     P_a(j,k) = 0.5*Z(j,k)         for DOC-VIRT block
+!>     P_a(i,k) = 0.5*Z(i,k)         for SOCC-VIRT block
+!>
+!>   Beta:
+!>     P_b(a,b) = T_b(a,b)           for a,b = nocb+1:nbf (virt-virt)
+!>     P_b(j,i) = 0.5*Z(j,i)         for DOC-SOCC block
+!>     P_b(j,k) = 0.5*Z(j,k)         for DOC-VIRT block
+!>
+!> Note: The 0.5 factor on Z differs from UHF (which has no factor).
+!>
+!> @param[out] pa   Alpha density in MO basis (nbf, nbf)
+!> @param[out] pb   Beta density in MO basis (nbf, nbf)
+!> @param[in]  ta   Unrelaxed alpha density T (packed)
+!> @param[in]  tb   Unrelaxed beta density T (packed)
+!> @param[in]  z    Z-vector solution (lzdim)
+!> @param[in]  noca Number of alpha occupied
+!> @param[in]  nocb Number of beta occupied
   subroutine sfropcal(pa, pb, ta, tb, z, &
                       noca, nocb)
     use precision, only: dp
@@ -751,7 +897,42 @@ contains
 
   end subroutine sfropcal
 
-  subroutine sfrowcal(wmo, target_energy, mo_energy_a, fa, fb, bvec, xk, &
+!> @brief Compute energy-weighted density W for ROHF SF-TDDFT gradient
+!>
+!> The W matrix appears in nuclear gradient (overlap derivative term):
+!>
+!>   dE/dR = ... - sum_pq W_pq * dS_pq/dR
+!>
+!> For ROHF with doc-socc-virt structure, W has six blocks:
+!>
+!>   W_ij (DOC-DOC):    H[P]_ij_a + H[P]_ij_b + 2*(omega-E_k)*X*X terms
+!>   W_xy (SOCC-SOCC):  H[P]_xy_a + alpha + beta intermediates
+!>   W_ab (VIRT-VIRT):  beta intermediate (omega+E_k)*X*X
+!>   W_ix (DOC-SOCC):   E_i*Z + 0.5*Fock terms + H[X]*X
+!>   W_ia (DOC-VIRT):   E_i*Z + 0.5*Fock terms + H[X]*X
+!>   W_xa (SOCC-VIRT):  E_x*Z + 0.5*Fock terms + H[X]*X
+!>
+!> where:
+!>   i,j = DOC indices (1:nocb)
+!>   x,y = SOCC indices (nocb+1:noca)
+!>   a,b = VIRT indices (noca+1:nbf)
+!>   omega = target excitation energy
+!>
+!> The alpha/beta intermediates involve X^T * diag(omega +/- E) * X.
+!>
+!> @param[out] wmo           W matrix in MO basis (nbf, nbf), lower triangle
+!> @param[in]  target_energy Excitation energy omega
+!> @param[in]  mo_energy_a   Alpha orbital energies
+!> @param[in]  mo_energy_b   Beta orbital energies
+!> @param[in]  fa, fb        Fock matrices in MO basis
+!> @param[in]  bvec          Excitation amplitudes X
+!> @param[in]  xk            Z-vector solution
+!> @param[in]  xhxa, xhxb    H[X]*X contributions
+!> @param[in]  hppija        H[P] alpha occ-occ block
+!> @param[in]  hppijb        H[P] beta occ-occ block
+!> @param[in]  noca          Number of alpha occupied
+!> @param[in]  nocb          Number of beta occupied
+  subroutine sfrowcal(wmo, target_energy, mo_energy_a, mo_energy_b, fa, fb, bvec, xk, &
                       xhxa, xhxb, hppija, hppijb, noca, nocb)
     use precision, only: dp
 
@@ -760,6 +941,7 @@ contains
     real(kind=dp), intent(out), dimension(:,:) :: wmo
     real(kind=dp), intent(in) :: target_energy
     real(kind=dp), intent(in), dimension(:) :: mo_energy_a
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_b
     real(kind=dp), intent(in), dimension(:,:) :: fa, fb
     real(kind=dp), intent(in), dimension(:) :: bvec
     real(kind=dp), intent(in), dimension(:) :: xk
@@ -780,30 +962,33 @@ contains
              wrk2(nbf,nbf), &
              source=0.0_dp)
 
-!   ----- COPY xk -----
+    ! Unpack Z-vector from 1D array xk to 2D matrix wrk1
+    ! Z has 3 blocks for ROHF: Z(closed,somo), Z(closed,virt), Z(somo,virt)
     ij = 0
-    do i = nocb+1, noca
+    do i = nocb+1, noca       ! Z_ix: closed-SOMO block
       do j = 1, nocb
         ij = ij+1
         wrk1(j,i) = xk(ij)
       end do
     end do
 
-    do i = noca+1, nbf
+    do i = noca+1, nbf        ! Z_ia: closed-virtual block
       do j = 1, nocb
         ij = ij+1
         wrk1(j,i) = xk(ij)
       end do
     end do
 
-    do k = noca+1, nbf
+    do k = noca+1, nbf        ! Z_xa: SOMO-virtual block
       do i = nocb+1, noca
         ij = ij+1
         wrk1(i,k) = xk(ij)
       end do
     end do
 
-! ! W_ix
+    ! W_ix: closed-SOMO block (i=closed, x=SOMO)
+    ! W_ix = eps_i*Z_ix + 0.5*sum_j(-F_jx*Z_ji) + 0.5*sum_a(F_ax*Z_xa)
+    !        + hxa_ix + hxb_ix + H+_ix[P]
     wrk = 0.0_dp
     do x = 1, nocb
       do k = 1, nocb
@@ -819,16 +1004,18 @@ contains
       end do
     end do
 
-    wmo(1:nocb,lr1:lr2) = wrk(1:nocb,1:2)*0.5_dp &
-                        + xhxa(1:nocb,lr1:lr2) &
-                        + xhxb(1:nocb,lr1:lr2) &
-                        + hppija(1:nocb,lr1:lr2)
-    wmo(1:nocb,lr1) = wmo(1:nocb,lr1) &
-                    + mo_energy_a(1:nocb)*wrk1(1:nocb,lr1)
-    wmo(1:nocb,lr2) = wmo(1:nocb,lr2) &
-                    + mo_energy_a(1:nocb)*wrk1(1:nocb,lr2)
+    do i = 1, nocb
+      do x = 1, lr2-lr1+1
+        wmo(i, lr1+x-1) = mo_energy_a(i) * wrk1(i, lr1+x-1) &
+                        + 0.5_dp * wrk(i, x) &
+                        + xhxa(i, lr1+x-1) &
+                        + xhxb(i, lr1+x-1) &
+                        + hppija(i, lr1+x-1)
+      end do
+    end do
 
-!   ----- W_IA -----
+    ! W_ia: closed-virtual block (i=closed, a=virtual)
+    ! W_ia = eps_i*Z_ia + 0.5*sum_x(F_xi*Z_xa) + hxb_ia
     wrk = 0.0_dp
     do i = 1, nocb
       do a = 1, nbf-noca
@@ -845,7 +1032,8 @@ contains
                     + mo_energy_a(1:nocb)*wrk1(1:nocb,a)
     end do
 
-!   ----- W_XA -----
+    ! W_xa: SOMO-virtual block (x=SOMO, a=virtual)
+    ! W_xa = eps_x*Z_xa + 0.5*(sum_j F_jx*Z_ja - sum_y F_xy*Z_ya) + hxb_xa
     wrk = 0.0_dp
     do a = 1, nbf-noca
       do k = 1, nocb
@@ -869,7 +1057,9 @@ contains
                      + mo_energy_a(lr1:lr2)*wrk1(lr1:lr2,a)
     end do
 
-!   Alpha intermediate
+    ! Alpha intermediate for W_ij/W_xy:
+    ! wrk1_ij = 2 * sum_a (omega - eps^beta_a) * X_ia * X_ja
+    ! Uses: D_ab = 2*(omega*delta_ab - F^beta_ab) for beta-virtual block
     wrk = - fb
     do i = nocb+1, nbf
         wrk(i,i) = wrk(i,i)+target_energy
@@ -886,7 +1076,9 @@ contains
                         bvec, noca, &
                0.0_dp, wrk1, nbf)
 
-!   beta intermediate
+    ! Beta intermediate for W_xy/W_ab:
+    ! wrk_ab = 2 * sum_i (omega + eps^alpha_i) * X_ia * X_ib
+    ! Uses: D_ij = 2*(omega*delta_ij + F^alpha_ij) for alpha-occupied block
     wrk = fa
     do i = 1, noca
         wrk(i,i) = wrk(i,i)+target_energy
@@ -902,33 +1094,39 @@ contains
                        wrk2, noca, &
                0.0_dp, wrk, nbf)
 
-  ! W_ij
+    ! W_ij: closed-closed block
+    ! W_ij = H+_ij_alpha[P] + H+_ij_beta[P] + 2*sum_a(omega-eps^beta_a)*X_ia*X_ja
     do i = 1, nocb
       do j = 1, i
         wmo(i,j) = hppija(i,j)+hppijb(i,j)+wrk1(i,j)
       end do
     end do
 
-  ! W_xy
+    ! W_xy: SOMO-SOMO block
+    ! W_xy = H+_xy_alpha[P] + 2*sum_a(omega-eps^beta_a)*X_xa*X_ya
+    !        + 2*sum_i(omega+eps^alpha_i)*X_ix*X_iy
     do x = nocb+1, noca
       do y = nocb+1, x
         wmo(x,y) = hppija(x,y)+wrk1(x,y)+wrk(x-nocb,y-nocb)
       end do
     end do
 
-  ! W_ab
+    ! W_ab: virtual-virtual block
+    ! W_ab = 2*sum_i(omega+eps^alpha_i)*X_ia*X_ib
     do a = noca+1, nbf
       do b = noca+1, a
         wmo(a,b) = wrk(a-nocb,b-nocb)
       end do
     end do
 
-  ! Scale diagonal elements
+    ! Scale diagonal: W_pp*(1+delta_pp) stored as lower triangle, so halve diagonal
     do i = 1, nbf
       wmo(i,i) = wmo(i,i)*0.5_dp
     end do
 
+    ! Negate: gradient convention W -> -W
     wmo = -wmo
+
     deallocate(wrk, wrk1, wrk2)
 
   end subroutine sfrowcal
@@ -1101,4 +1299,493 @@ contains
     end do
 
   end subroutine
+
+!> @brief Compute RHS of Z-vector equation for UHF SF-TDDFT
+!>
+!> Solves: (A+B)*Z = -RHS for orbital relaxation in gradient calculation.
+!>
+!> Mathematical formula (Furche & Ahlrichs, JCP 117, 7433, 2002):
+!>
+!>   RHS_ia = H[T]_ia + (H[X]*X)_ia
+!>
+!> where:
+!>   H[T]   = Fock-like response to unrelaxed density T
+!>   H[X]*X = response coupling (transition density contribution)
+!>
+!> For UHF, alpha and beta spaces are treated separately:
+!>   Alpha block: R(i,a) = HPTA(i,a) + XHXA(a,i)
+!>   Beta block:  R(i,a) = HPTB(i,a) - XHXB(i,a)
+!>
+!> The sign flip at the end gives the actual RHS: rhs = -R
+!>
+!> Reference: Shao, Head-Gordon, Krylov, JCP 118, 4807 (2003) - SF-TDDFT
+!>
+!> @param[out] rhs      RHS vector, dimension (nocca*nvira + noccb*nvirb)
+!> @param[in]  hpta     H[T] alpha part in MO basis (nocca, nvira)
+!> @param[in]  hptb     H[T] beta part in MO basis (noccb, nvirb)
+!> @param[in]  xhxa     2*H[X]*X alpha contribution (nbf, nocca)
+!> @param[in]  xhxb     2*H[X]*X beta contribution (nbf, nbf)
+!> @param[in]  nocca    Number of alpha occupied orbitals
+!> @param[in]  noccb    Number of beta occupied orbitals
+  subroutine sfrcalc(rhs, hpta, hptb, xhxa, xhxb, nocca, noccb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: rhs
+    real(kind=dp), intent(in), dimension(:,:) :: hpta   ! (nocca, nvira)
+    real(kind=dp), intent(in), dimension(:,:) :: hptb   ! (noccb, nvirb)
+    real(kind=dp), intent(in), dimension(:,:) :: xhxa   ! (nbf, nocca)
+    real(kind=dp), intent(in), dimension(:,:) :: xhxb   ! (nbf, nbf)
+    integer, intent(in) :: nocca, noccb
+
+    integer :: nbf, nvira, nvirb, nconfa, nconf
+    integer :: i, j, ij
+
+    nbf = ubound(xhxa, 1)
+    nvira = nbf - nocca
+    nvirb = nbf - noccb
+
+    ! ----- ALPHA PART: R(i,a) = HPTA(i,a) + XHXA(a,i) -----
+    ij = 0
+    do j = nocca+1, nbf
+      do i = 1, nocca
+        ij = ij + 1
+        rhs(ij) = hpta(i, j-nocca) + xhxa(j, i)
+      end do
+    end do
+    nconfa = nocca * nvira
+
+    ! ----- BETA PART: R(i,a) = HPTB(i,a) - XHXB(i,a) -----
+    ij = 0
+    do j = noccb+1, nbf
+      do i = 1, noccb
+        ij = ij + 1
+        rhs(nconfa + ij) = hptb(i, j-noccb) - xhxb(i, j)
+      end do
+    end do
+
+    ! ----- Negate for RHS of Z-vector equation -----
+    nconf = nconfa + noccb * nvirb
+    rhs(1:nconf) = -rhs(1:nconf)
+
+  end subroutine sfrcalc
+
+!> @brief Compute preconditioner for UHF SF Z-vector iteration
+!>
+!> The preconditioner approximates the diagonal of (A+B) matrix:
+!>
+!>   M_ia = epsilon_a - epsilon_i
+!>
+!> where epsilon are orbital energies (Koopmans' theorem approximation).
+!> Used in conjugate gradient solver: pk = M^{-1} * residual
+!>
+!> Reference: Furche & Ahlrichs, JCP 117, 7433 (2002), Eq. (65)
+!>
+!> @param[out] xm       Preconditioner vector M_ia, dimension (nocc*nvir)
+!> @param[in]  e        Orbital energies, dimension (nbf)
+!> @param[in]  nocc     Number of occupied orbitals
+  subroutine xecalc(xm, e, nocc)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: xm
+    real(kind=dp), intent(in), dimension(:) :: e
+    integer, intent(in) :: nocc
+
+    integer :: nbf, i, j, ij
+
+    nbf = ubound(e, 1)
+
+    ! M_ia = eps_a - eps_i  (diagonal of orbital Hessian)
+    do j = nocc+1, nbf   ! virtual
+      do i = 1, nocc      ! occupied
+        ij = (j-nocc-1)*nocc + i
+        xm(ij) = e(j) - e(i)
+      end do
+    end do
+
+  end subroutine xecalc
+
+!> @brief Add diagonal orbital energy term to LHS: (E_a - E_i)*Z_ia
+!>
+!> The Z-vector equation has the form:
+!>
+!>   [(A+B) + diag(epsilon_a - epsilon_i)] * Z = -RHS
+!>
+!> This subroutine adds the diagonal term:
+!>
+!>   LHS_ia += (epsilon_a - epsilon_i) * Z_ia
+!>
+!> @param[inout] lhs     LHS vector, modified in place
+!> @param[in]    e       Orbital energies (nbf)
+!> @param[in]    z       Current Z-vector iterate
+!> @param[in]    nocc    Number of occupied orbitals
+  subroutine sfuesum(lhs, e, z, nocc)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:) :: lhs
+    real(kind=dp), intent(in), dimension(:) :: e
+    real(kind=dp), intent(in), dimension(:) :: z
+    integer, intent(in) :: nocc
+
+    integer :: nbf, i, j, ij
+
+    nbf = ubound(e, 1)
+
+    do j = nocc+1, nbf   ! virtual
+      do i = 1, nocc      ! occupied
+        ij = (j-nocc-1)*nocc + i
+        lhs(ij) = lhs(ij) + (e(j) - e(i)) * z(ij)
+      end do
+    end do
+
+  end subroutine sfuesum
+
+!> @brief Unpack Z-vector from 1D array to 2D MO matrix
+!>
+!> Converts packed Z-vector Z(ia) to matrix form Z_MO(i,a):
+!>
+!>   Z_MO(i,a) = Z(ia)   for i=1:nocc, a=nocc+1:nbf
+!>   Z_MO      = 0       elsewhere
+!>
+!> The Z-vector is packed in column-major order (i varies fastest):
+!>   Z(1) = Z(1,nocc+1), Z(2) = Z(2,nocc+1), ..., Z(nocc) = Z(nocc,nocc+1),
+!>   Z(nocc+1) = Z(1,nocc+2), ...
+!>
+!> NOTE: Caller must transform to AO basis separately using:
+!>   Z_AO = C * Z_MO * C^T
+!>
+!> @param[out]   zmo     Z-vector in MO matrix form (nbf, nbf)
+!> @param[in]    z       Packed Z-vector (nocc * nvir)
+!> @param[in]    nocc    Number of occupied orbitals
+!> @param[in]    nbf     Number of basis functions
+  subroutine sfgen(zmo, z, nocc, nbf)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: zmo
+    real(kind=dp), intent(in), dimension(:) :: z
+    integer, intent(in) :: nocc, nbf
+
+    integer :: i, a, ia
+
+    zmo = 0.0_dp
+
+    ! Convert Z(ia) -> Z_MO(i,a) where i=1:nocc, a=nocc+1:nbf
+    ! Z is packed as: Z(ia) = Z(i, a) with i running faster (column-major)
+    ia = 0
+    do a = nocc+1, nbf  ! virtual orbitals
+      do i = 1, nocc     ! occupied orbitals
+        ia = ia + 1
+        zmo(i, a) = z(ia)
+      end do
+    end do
+
+  end subroutine sfgen
+
+!> @brief Construct relaxed density matrices P = T + Z for UHF SF-TDDFT
+!>
+!> The relaxed difference density for excited state gradients:
+!>
+!>   P = T + Z
+!>
+!> where:
+!>   T = unrelaxed density from excitation amplitudes
+!>   Z = orbital relaxation from Z-vector equation
+!>
+!> Unrelaxed density T (from Furche & Ahlrichs, JCP 117, 7433, 2002):
+!>   T_ij = -sum_a X_ia * X_ja  (hole density, occ-occ block)
+!>   T_ab = +sum_i X_ia * X_ib  (particle density, virt-virt block)
+!>
+!> For UHF spin-flip (alpha->beta excitation):
+!>   P_alpha(i,j) = Tij(i,j)    (alpha occ-occ)
+!>   P_alpha(i,a) = Z_alpha(i,a) (alpha occ-virt relaxation)
+!>   P_beta(a,b)  = Tab(a,b)    (beta virt-virt)
+!>   P_beta(i,a)  = Z_beta(i,a)  (beta occ-virt relaxation)
+!>
+!> @param[out] pa       Alpha density matrix in MO basis (nbf, nbf)
+!> @param[out] pb       Beta density matrix in MO basis (nbf, nbf)
+!> @param[in]  tij      Unrelaxed occ-occ density (nocca, nocca)
+!> @param[in]  tab      Unrelaxed vir-virt density (nvirb, nvirb)
+!> @param[in]  xk       Z-vector solution [alpha (nocca*nvira) | beta (noccb*nvirb)]
+!> @param[in]  nocca    Number of alpha occupied orbitals
+!> @param[in]  noccb    Number of beta occupied orbitals
+!> @param[in]  nvira    Number of alpha virtual orbitals
+!> @param[in]  nvirb    Number of beta virtual orbitals
+  subroutine sfpcal(pa, pb, tij, tab, xk, nocca, noccb, nvira, nvirb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: pa, pb
+    real(kind=dp), intent(in), dimension(:,:) :: tij, tab
+    real(kind=dp), intent(in), dimension(:) :: xk
+    integer, intent(in) :: nocca, noccb, nvira, nvirb
+
+    integer :: i, j, ij, nbf, nconfa
+
+    nbf = ubound(pa, 1)
+    nconfa = nocca * nvira
+
+    ! P^alpha_ij = T^alpha_ij = -sum_a X_ia * X_ja  (occ-occ depletion)
+    ! P^alpha_ia = Z^alpha_ia                      (occ-virt relaxation)
+    pa = 0.0_dp
+    pa(1:nocca, 1:nocca) = tij
+    do j = 1, nvira
+      do i = 1, nocca
+        ij = (j-1)*nocca + i
+        pa(i, nocca+j) = xk(ij)
+      end do
+    end do
+
+    ! P^beta_ab = T^beta_ab = +sum_i X_ia * X_ib   (virt-virt population)
+    ! P^beta_ia = Z^beta_ia                         (occ-virt relaxation)
+    pb = 0.0_dp
+    do j = 1, nvirb
+      do i = 1, nvirb
+        pb(noccb+i, noccb+j) = tab(i, j)
+      end do
+    end do
+    do j = 1, nvirb
+      do i = 1, noccb
+        ij = nconfa + (j-1)*noccb + i
+        pb(i, noccb+j) = xk(ij)
+      end do
+    end do
+
+  end subroutine sfpcal
+
+!> @brief Compute LHS of Z-vector equation for UHF SF-TDDFT
+!>
+!> The Z-vector equation is (Furche & Ahlrichs, JCP 117, 7433, 2002):
+!>
+!>   (A + B) * Z = -RHS
+!>
+!> where (A+B) is the orbital Hessian. This subroutine computes:
+!>
+!>   LHS_ia = [(A+B)*pk]_ia + (epsilon_a - epsilon_i) * pk_ia
+!>
+!> The two-electron part (A+B)*pk comes from integral transformation:
+!>   (A+B)*pk = 2*(ia|jb)*pk_jb - (ij|ab)*pk_jb  (Coulomb - Exchange)
+!>
+!> For UHF, alpha and beta are computed separately with their
+!> respective orbital energies and coupled via Coulomb integrals.
+!>
+!> @param[out] lhs        LHS vector [alpha (nocca*nvira) | beta (noccb*nvirb)]
+!> @param[in]  pk         Current Z-vector iterate
+!> @param[in]  mo_energy_a Alpha orbital energies
+!> @param[in]  mo_energy_b Beta orbital energies
+!> @param[in]  ab1_mo_a   (A+B)*pk alpha part in MO basis (nocca, nvira)
+!> @param[in]  ab1_mo_b   (A+B)*pk beta part in MO basis (noccb, nvirb)
+!> @param[in]  nocca      Number of alpha occupied orbitals
+!> @param[in]  noccb      Number of beta occupied orbitals
+!> @param[in]  nvira      Number of alpha virtual orbitals
+!> @param[in]  nvirb      Number of beta virtual orbitals
+  subroutine sflhs(lhs, pk, mo_energy_a, mo_energy_b, ab1_mo_a, ab1_mo_b, &
+                   nocca, noccb, nvira, nvirb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: lhs
+    real(kind=dp), intent(in), dimension(:) :: pk
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_a, mo_energy_b
+    real(kind=dp), intent(in), dimension(:,:) :: ab1_mo_a, ab1_mo_b
+    integer, intent(in) :: nocca, noccb, nvira, nvirb
+
+    integer :: i, j, ij, nconfa, lzdim
+
+    nconfa = nocca * nvira
+    lzdim = nconfa + noccb * nvirb
+
+    ! LHS^alpha_ia = [(A+B)*pk]^alpha_ia + (eps^alpha_a - eps^alpha_i) * pk^alpha_ia
+    ! LHS^beta_ia  = [(A+B)*pk]^beta_ia  + (eps^beta_a  - eps^beta_i)  * pk^beta_ia
+    lhs = 0.0_dp
+
+    ! Alpha: copy [(A+B)*pk]^alpha from 2D MO matrix to packed vector
+    do j = 1, nvira
+      do i = 1, nocca
+        ij = (j-1)*nocca + i
+        lhs(ij) = ab1_mo_a(i, j)
+      end do
+    end do
+
+    ! Beta: copy [(A+B)*pk]^beta from 2D MO matrix to packed vector
+    do j = 1, nvirb
+      do i = 1, noccb
+        ij = nconfa + (j-1)*noccb + i
+        lhs(ij) = ab1_mo_b(i, j)
+      end do
+    end do
+
+    ! Add diagonal orbital energy term: (eps_a - eps_i) * pk_ia
+    call sfuesum(lhs(1:nconfa), mo_energy_a, pk(1:nconfa), nocca)
+    call sfuesum(lhs(nconfa+1:lzdim), mo_energy_b, pk(nconfa+1:lzdim), noccb)
+
+  end subroutine sflhs
+
+!> @brief Compute energy-weighted density matrix W for UHF SF-TDDFT gradient
+!>
+!> The W matrix (Lagrangian multiplier) appears in the gradient expression
+!> (Furche & Ahlrichs, JCP 117, 7433, 2002, Eq. 42):
+!>
+!>   dE/dR = ... - sum_pq W_pq * dS_pq/dR
+!>
+!> W enforces orbital orthonormality constraints. For SF-TDDFT:
+!>
+!>   W_ij = H[P]_ij + 2*sum_ab (omega - epsilon_b)*X_ia*X_jb
+!>   W_ab = 2*sum_ij (omega + epsilon_i)*X_ia*X_jb
+!>   W_ia = epsilon_i * Z_ia + (H[X]*X)_ia
+!>
+!> where:
+!>   omega      = excitation energy
+!>   epsilon    = orbital energies
+!>   X          = excitation amplitudes (bvec)
+!>   Z          = Z-vector (orbital relaxation)
+!>   H[P]       = Fock response to relaxed density
+!>   H[X]*X     = transition density coupling
+!>
+!> For UHF, alpha and beta W matrices are built separately because
+!> they transform with different MO coefficients:
+!>   W_AO_total = C_a * W_a * C_a^T + C_b * W_b * C_b^T
+!>
+!> @param[out] wmo_a         Alpha W matrix in MO basis (nbf, nbf)
+!> @param[out] wmo_b         Beta W matrix in MO basis (nbf, nbf)
+!> @param[in]  target_energy Excitation energy omega
+!> @param[in]  mo_energy_a   Alpha orbital energies
+!> @param[in]  mo_energy_b   Beta orbital energies
+!> @param[in]  fa, fb        Fock matrices (unused in current impl)
+!> @param[in]  bvec          Excitation amplitudes X (noca*nvirb)
+!> @param[in]  xk            Z-vector solution
+!> @param[in]  xhxb          H[X]*X beta contribution
+!> @param[in]  hppija        H[P] alpha occ-occ block
+!> @param[in]  hppijb        H[P] beta occ-occ block
+!> @param[in]  noca          Number of alpha occupied
+!> @param[in]  nocb          Number of beta occupied
+  subroutine sfwcal(wmo_a, wmo_b, target_energy, mo_energy_a, mo_energy_b, &
+                    fa, fb, bvec, xk, xhxb, hppija, hppijb, noca, nocb)
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: wmo_a, wmo_b
+    real(kind=dp), intent(in) :: target_energy
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_a
+    real(kind=dp), intent(in), dimension(:) :: mo_energy_b
+    real(kind=dp), intent(in), dimension(:,:) :: fa, fb
+    real(kind=dp), intent(in), dimension(:) :: bvec
+    real(kind=dp), intent(in), dimension(:) :: xk
+    real(kind=dp), intent(in), dimension(:,:) :: xhxb
+    real(kind=dp), intent(in), dimension(:,:) :: hppija, hppijb
+    integer, intent(in) :: noca, nocb
+
+    real(kind=dp), allocatable, dimension(:,:) :: wrk, wrk1, wrk2
+    real(kind=dp) :: dum, ee
+    integer :: i, j, k, a, ii, jj, ij, nbf, nvira, nvirb, iia
+
+    nbf = ubound(fa, 1)
+    nvira = nbf - noca  ! alpha virtuals
+    nvirb = nbf - nocb  ! beta virtuals
+    ee = target_energy
+
+    allocate(wrk(nbf,nbf), wrk1(nbf,nbf), wrk2(nbf,nbf), source=0.0_dp)
+
+    wmo_a = 0.0_dp
+    wmo_b = 0.0_dp
+
+    ! ===== Extract Z-vector components =====
+    ! xk has structure: [alpha Z (noca*nvira)] + [beta Z (nocb*nvirb)]
+    ! Alpha Z: ZA(i,a) for i=1:noca, a=noca+1:nbf
+    ! Beta Z:  ZB(i,a) for i=1:nocb, a=nocb+1:nbf
+
+    ! ===== W_IJ (occupied-occupied) =====
+
+    ! ALPHA W_IJ: 2*(EE-EB(k))*V*V + HPPIJA
+    ! where V is bvec(i,a) for i=1:noca, a=1:nvirb (alpha-occ to beta-virt transition)
+    ! EB(k) are beta orbital energies for virtual k
+    do i = 1, noca
+      do j = 1, i
+        dum = 0.0_dp
+        do k = nocb+1, nbf
+          ! V indices: (k-nocb-1)*noca + i, (k-nocb-1)*noca + j
+          ii = (k - nocb - 1)*noca + i
+          jj = (k - nocb - 1)*noca + j
+          if (ii >= 1 .and. ii <= size(bvec) .and. jj >= 1 .and. jj <= size(bvec)) then
+            dum = dum + (ee - mo_energy_b(k))*bvec(ii)*bvec(jj)
+          end if
+        end do
+        wmo_a(i,j) = dum + dum + hppija(i,j)
+      end do
+    end do
+
+    ! BETA W_IJ: just HPPIJB
+    do i = 1, nocb
+      do j = 1, i
+        wmo_b(i,j) = hppijb(i,j)
+      end do
+    end do
+
+    ! ===== W_AB (virtual-virtual) =====
+
+    ! ALPHA W_AB: zero (nothing to add)
+
+    ! BETA W_AB: 2*(EE+EA(k))*V*V
+    ! V indices: for beta virtual a,b and alpha occupied k
+    do i = nocb+1, nbf
+      ii = i - nocb
+      do j = nocb+1, i
+        jj = j - nocb
+        dum = 0.0_dp
+        do k = 1, noca
+          ! V(ii,k) = bvec((ii-1)*noca + k)
+          iia = (ii - 1)*noca + k
+          ij  = (jj - 1)*noca + k
+          if (iia >= 1 .and. iia <= size(bvec) .and. ij >= 1 .and. ij <= size(bvec)) then
+            dum = dum + (ee + mo_energy_a(k))*bvec(iia)*bvec(ij)
+          end if
+        end do
+        wmo_b(i,j) = dum + dum
+      end do
+    end do
+
+    ! ===== W_IA (occupied-virtual) =====
+
+    ! ALPHA W_IA: EA(I)*ZA(I,A)
+    ! ZA is stored as xk(1:noca*nvira) with I varying faster (column-major)
+    iia = 0
+    do j = noca+1, nbf
+      do i = 1, noca
+        iia = iia + 1
+        wmo_a(i,j) = mo_energy_a(i)*xk(iia)
+      end do
+    end do
+
+    ! BETA W_IA: XHXB(I,J) + EB(I)*ZB(I,A)
+    ! ZB is stored as xk(noca*nvira+1 : end) with I varying faster
+    iia = noca * nvira  ! offset for beta Z
+    do j = nocb+1, nbf
+      do i = 1, nocb
+        iia = iia + 1
+        wmo_b(i,j) = xhxb(i,j) + mo_energy_b(i)*xk(iia)
+      end do
+    end do
+
+    ! ===== Scale diagonal and negate =====
+    do i = 1, nbf
+      wmo_a(i,i) = wmo_a(i,i)*0.5_dp
+      wmo_b(i,i) = wmo_b(i,i)*0.5_dp
+    end do
+
+    wmo_a = -wmo_a
+    wmo_b = -wmo_b
+
+    deallocate(wrk, wrk1, wrk2)
+
+  end subroutine sfwcal
+
 end module tdhf_sf_lib

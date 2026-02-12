@@ -109,6 +109,7 @@ OQP_CONFIG_SCHEMA = {
         'trh_nmic': {'type': int,   'default': '50'},
         'trh_gred': {'type': float, 'default': '0.001'},
         'trh_lred': {'type': float, 'default': '0.0001'},
+        'jacobi_rotation': {'type': bool, 'default': 'False'},
     },
 
     'dftgrid': {
@@ -285,6 +286,7 @@ class OQPData:
             "trh_nmic": "set_trah_n_micro",
             "trh_gred": "set_trah_global_red_factor",
             "trh_lred": "set_trah_local_red_factor",
+            "jacobi_rotation": "set_scf_jacobi_rotation",
         },
         "dftgrid": {
             "rad_type": "set_dftgrid_rad_type",
@@ -541,6 +543,10 @@ class OQPData:
     def set_scf_rstctmo(self, rstctmo):
         """restrict MO """
         self._data.control.rstctmo = rstctmo
+
+    def set_scf_jacobi_rotation(self, jacobi_rotation):
+        """Jacobi MO rotation after SCF for UHF reference"""
+        self._data.control.jacobi_rotation = jacobi_rotation
 
     def set_scf_active_basis(self, active_basis):
         """Select basis set: 0 => info%basis

@@ -15,16 +15,6 @@ contains
     call tdhf_mrsf_energy(inf)
   end subroutine tdhf_mrsf_energy_C
 
-  subroutine tdhf_umrsf_energy_C(c_handle) bind(C, name="tdhf_umrsf_energy")
-    use c_interop, only: oqp_handle_t, oqp_handle_get_info
-    use types, only: information
-    type(oqp_handle_t) :: c_handle
-    type(information), pointer :: inf
-    inf => oqp_handle_get_info(c_handle)
-    inf%tddft%umrsf= .true.
-    call tdhf_mrsf_energy(inf)
-  end subroutine tdhf_umrsf_energy_C
-
   subroutine tdhf_mrsf_energy(infos)
     use io_constants, only: iw
     use oqp_tagarray_driver
@@ -47,9 +37,9 @@ contains
       get_transition_density, get_transitions, &
       get_transition_dipole, print_results, get_spin_square
     use tdhf_mrsf_lib, only: &
-      mrinivec, mrsfcbc,umrsfcbc, mrsfmntoia,umrsfmntoia, mrsfesum, &
+      mrinivec, mrsfcbc, umrsfcbc, mrsfmntoia, umrsfmntoia, mrsfesum, &
       mrsfqroesum, get_mrsf_transitions, &
-      get_mrsf_transition_density, get_jacobi, umrsfssqu
+      get_mrsf_transition_density, umrsfssqu
     use mathlib, only: orthogonal_transform, orthogonal_transform_sym, &
       unpack_matrix
     use oqp_linalg
@@ -107,9 +97,7 @@ contains
     type(int2_td_data_t), target :: int2_data_q
 
     logical :: dft = .false.
-    integer :: scf_type, mol_mult
-
-    logical :: umrsf, umrsf_jac 
+    integer :: scf_type, mol_mult 
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: &
@@ -127,14 +115,6 @@ contains
   ! 3. LOG: Write: Main output file
     open (unit=iw, file=infos%log_filename, position="append")
 
-    umrsf = infos%tddft%umrsf
-  !
-    if (umrsf) then
-      call print_module_info('UMRSF_TDHF_Energy','Computing Energy of UMRSF-TDDFT')
-    else 
-      call print_module_info('MRSF_TDHF_Energy','Computing Energy of MRSF-TDDFT')
-    endif
-
   ! Load basis set
     basis => infos%basis
     basis%atoms => infos%atoms
@@ -150,24 +130,19 @@ contains
     target_state = infos%tddft%target_state
     maxvec = infos%tddft%maxvec
     cnvtol = infos%tddft%cnvtol
-!   infos%tddft%debug_mode = .True.
     debug_mode = infos%tddft%debug_mode
 
     mol_mult = infos%mol_prop%mult
-    if (umrsf) then
-      if (mol_mult/=3) call show_message('UMRSF-TDDFT are available for UHF ref.&
-          &with ONLY triplet multiplicity(mult=3)',with_abort)
-    else
-      if (mol_mult/=3) call show_message('MRSF-TDDFT are available for ROHF ref.&
-          &with ONLY triplet multiplicity(mult=3)',with_abort)
-    endif
+    if (mol_mult /= 3) call show_message('MRSF-TDDFT requires triplet multiplicity (mult=3)', with_abort)
+
     scf_type = infos%control%scftype
-    if (.not. umrsf .and. scf_type==3) roref = .true.
-    
-    if (umrsf .and. scf_type/=2) then
-      call show_message('U-MRSF requires UHF reference (SCFTYPE=2).',with_abort)
-    else if (umrsf) then
-      uhfref = .true.
+    if (scf_type == 3) roref = .true.
+    if (scf_type == 2) uhfref = .true.
+
+    if (scf_type == 2) then
+      call print_module_info('MRSF_TDHF_Energy','Computing Energy of MRSF-TDDFT (UHF ref)')
+    else
+      call print_module_info('MRSF_TDHF_Energy','Computing Energy of MRSF-TDDFT (ROHF ref)')
     endif
 
     nbf = basis%nbf
@@ -202,7 +177,7 @@ contains
 
     infos%tddft%nstate = nstates
 
-    nvec = min(max(nstates,6), mxvec)
+    nvec = min(max(2*nstates, 20), mxvec)
 
     call infos%dat%remove_records(tags_alloc)
 
@@ -262,23 +237,17 @@ contains
     allocate(trans(xvec_dim,2), &
              source=0, stat=ok)
     if( ok/=0 ) call show_message('Cannot allocate memory', with_abort)
-  ! MO rotations (Jacobi) 
-    if (umrsf) then
-      call unpack_matrix(smat, smat_full, nbf, 'U')
-      call get_jacobi(infos, mo_a, mo_energy_a, mo_b, mo_energy_b, smat_full, nocca, wrk1, wrk2, 0)
-      call get_jacobi(infos, mo_a, mo_energy_a, mo_b, mo_energy_b, smat_full, nocca, wrk1, wrk2, 1)
-    endif
 
     ta => td_t(:,1)
     tb => td_t(:,2)
 
     if (mrst==1 .or. mrst==3 ) then
-        if (umrsf) then
+        if (uhfref) then
           allocate(mrsf_density(nvec,11,nbf,nbf), &
              source=0.0_dp, &
              stat=ok)
         else
-        allocate(mrsf_density(nvec,7,nbf,nbf), &
+          allocate(mrsf_density(nvec,7,nbf,nbf), &
                source=0.0_dp, &
                stat=ok)
         endif
@@ -293,8 +262,14 @@ contains
     if( ok/=0 ) call show_message('Cannot allocate memory', with_abort)
 
     scale_exch = 1.0_dp
-    if (infos%tddft%HFscale == -1.0_dp) &
-          infos%tddft%HFscale = infos%dft%HFscale
+    if (infos%tddft%HFscale == -1.0_dp) then
+      if (infos%dft%HFscale >= 0.0_dp) then
+        infos%tddft%HFscale = infos%dft%HFscale
+      else
+        ! Pure HF: full exact exchange
+        infos%tddft%HFscale = 1.0_dp
+      end if
+    end if
 
     if (infos%dft%cam_flag) then
       if (infos%tddft%cam_alpha == -1.0_dp) &
@@ -359,7 +334,7 @@ contains
     call flush(iw)
 
   ! Prepare for ROHF
-    if ((roref .and. .not. umrsf) .or. (uhfref .and. umrsf)) then
+    if ((roref .and. .not. uhfref) .or. (uhfref)) then
   !   Alpha
       call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, scr)
 
@@ -383,7 +358,7 @@ contains
 
   ! Construct TD trial vector
     if (mrst==1 .or. mrst==3) then
-     if (.not. umrsf) then
+     if (.not. uhfref) then
       call mrinivec(infos, mo_energy_a, mo_energy_a, bvec_mo, xm, nvec)
      else
       call mrinivec(infos, mo_energy_a, mo_energy_b, bvec_mo, xm, nvec)
@@ -419,7 +394,7 @@ contains
         if (mrst==1 .or. mrst==3) then
 
           call iatogen(bvec_mo(:,ivec), wrk1, nocca, noccb)
-          if (umrsf) then 
+          if (uhfref) then 
               call umrsfcbc(infos, mo_a, mo_b, wrk1,mrsf_density(iv,:,:,:))
           else
               call mrsfcbc(infos, mo_a, mo_b, wrk1, mrsf_density(iv,:,:,:))
@@ -436,7 +411,7 @@ contains
 
       if (mrst==1 .or. mrst==3) then
 
-        if (umrsf ) then
+        if (uhfref) then
           int2_udata_st = int2_umrsf_data_t( &
             d3 = mrsf_density(:iv,:,:,:), &
             tamm_dancoff = tamm_dancoff, &
@@ -474,14 +449,14 @@ contains
         endif
 
         ! Scaling factor if triplet
-        if (umrsf .and. mrst==3) then
+        if (uhfref .and. mrst==3) then
           fmrst2(:,1:10,:,:) = -fmrst2(:,1:10,:,:)
         else if (mrst==3) then
           fmrst2(:,1:6,:,:) = -fmrst2(:,1:6,:,:)
         endif
 
         ! Spin pair coupling
-        if (umrsf) then
+        if (uhfref) then
         
           if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
              fmrst2(:,10,:,:) = fmrst2(:,10,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
@@ -529,7 +504,7 @@ contains
         if (mrst==1 .or. mrst==3) then
 
           ! Product (A-B)*X
-          if (umrsf) then
+          if (uhfref) then
               call umrsfmntoia(infos, fmrst2(iv,:,:,:), amo, mo_a, mo_b, ivec)
           else
               call mrsfmntoia(infos, fmrst2(iv,:,:,:), amo, mo_a, mo_b, ivec)
@@ -629,7 +604,7 @@ contains
         end do
 
 ! U-version (working)
-        if (umrsf) then
+        if (uhfref) then
           do ist = 1, nstates
             call umrsfssqu(squared_S(ist),mo_a,mo_b, smat, wrk1,scr3,nbf,nbf2, &
                 xvec_dim,ist,nbf,bvec_mo,nocca,noccb, &
@@ -648,7 +623,7 @@ contains
             call get_mrsf_transition_density(infos, trden(:,:,ist,jst), bvec_mo, ist, jst)
           end do
         end do
-        if (umrsf) then
+        if (uhfref) then
           do ist = 1, nstates
             call umrsfssqu(squared_S(ist),mo_a,mo_b, smat, wrk1,scr3,nbf,nbf2, &
                 xvec_dim,ist,nbf,bvec_mo,nocca,noccb, &

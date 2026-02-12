@@ -49,16 +49,6 @@ contains
     call tdhf_mrsf_gradient(inf)
   end subroutine tdhf_mrsf_gradient_c
 
-  subroutine tdhf_umrsf_gradient_C(c_handle) bind(C, name="tdhf_umrsf_gradient")
-    use c_interop, only: oqp_handle_t, oqp_handle_get_info
-    use types, only: information
-    type(oqp_handle_t) :: c_handle
-    type(information), pointer :: inf
-    inf => oqp_handle_get_info(c_handle)
-    inf%tddft%umrsf = .true.
-    call tdhf_mrsf_gradient(inf)
-  end subroutine tdhf_umrsf_gradient_c
-
   subroutine tdhf_mrsf_gradient(infos)
     use io_constants, only: iw
     use oqp_tagarray_driver
@@ -92,7 +82,6 @@ contains
     integer :: mrst
     logical :: roref = .false.
     logical :: uref = .false.
-    logical :: umrsf
 
     type(dft_grid_t) :: molGrid
 
@@ -101,6 +90,8 @@ contains
     integer :: scf_type, mol_mult
 
     real(kind=dp), allocatable :: p(:,:,:), v(:,:,:), d(:,:,:), spc(:,:,:)
+    real(kind=dp), allocatable :: grad_1e(:,:)
+    integer :: dbg_i
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: dmat_a(:), dmat_b(:), td_mrsf_density(:,:,:), td_abxc(:,:), td_p(:,:)
@@ -118,9 +109,7 @@ contains
     if (scf_type==3) roref = .true.
     if (scf_type==2) uref = .true.
 
-    umrsf = infos%tddft%umrsf
-
-    if (umrsf) then
+    if (uref) then
         arr_size = 11
     else
         arr_size = 7
@@ -131,10 +120,10 @@ contains
   ! Files open
     open (unit=iw, file=infos%log_filename, position="append")
   !
-  if (umrsf) then
-    call print_module_info('UMRSF_Grad','Computing Gradient of UMRSF-TDDFT')
+  if (uref) then
+    call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT (UHF reference)')
   else
-    call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT')
+    call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT (ROHF reference)')
   endif
 !
     write(iw,'(/5X,"Gradient options"/&
@@ -164,6 +153,13 @@ contains
     call measure_time(print_total=1, log_unit=iw)
     call flush(iw)
 
+    ! DEBUG: print 1e gradient contribution
+    write(*,'(A)') '[GRAD_DECOMP] === After 1e gradient ==='
+    do dbg_i = 1, infos%mol_prop%natom
+      write(*,'(A,I2,A,3F15.8)') '[GRAD_DECOMP] atom ', dbg_i, ' 1e_grad = ', infos%atoms%grad(:,dbg_i)
+    end do
+    write(*,'(A,F15.8)') '[GRAD_DECOMP] 1e_grad X total = ', sum(infos%atoms%grad(1,:))
+
     allocate(v(nbf,nbf,2), source=0.0d0)
     allocate(d(nbf,nbf,2), source=0.0d0)
     allocate(p(nbf,nbf,2), source=0.0d0)
@@ -190,6 +186,16 @@ contains
       spc(1:arr_size,:,:) = td_mrsf_density
     end if
 
+    ! DEBUG: print norms of input matrices
+    write(*,'(A,F15.8)') '[GRAD_DECOMP] P_alpha norm = ', sqrt(sum(p(:,:,1)**2))
+    write(*,'(A,F15.8)') '[GRAD_DECOMP] P_beta  norm = ', sqrt(sum(p(:,:,2)**2))
+    write(*,'(A,F15.8)') '[GRAD_DECOMP] W (td_abxc) norm = ', sqrt(sum(v(:,:,1)**2))
+    write(*,'(A,F15.8)') '[GRAD_DECOMP] D_alpha norm = ', sqrt(sum(d(:,:,1)**2))
+    write(*,'(A,F15.8)') '[GRAD_DECOMP] D_beta  norm = ', sqrt(sum(d(:,:,2)**2))
+    if (mrst==1 .or. mrst==3) then
+      write(*,'(A,F15.8)') '[GRAD_DECOMP] SPC density norm = ', sqrt(sum(spc**2))
+    end if
+
 !   Compute xc gradient
     if (dft) then
       call dft_initialize(infos, basis, molGrid, verbose=.true.)
@@ -211,12 +217,30 @@ contains
       call flush(iw)
     end if
 
+    ! DEBUG: save 1e gradient before 2e
+    allocate(grad_1e(3, infos%mol_prop%natom))
+    grad_1e = infos%atoms%grad
+
 !   Compute 2e gradient
     if (mrst==1 .or. mrst==3) then
       call mrsf_2e_grad(basis, infos, d, p, spc, v(:,:,1))
     else if (mrst==5) then
       call sf_2e_grad(basis, infos, d, p, v(:,:,1))
     end if
+
+    ! DEBUG: print 2e gradient contribution
+    write(*,'(A)') '[GRAD_DECOMP] === After 2e gradient ==='
+    do dbg_i = 1, infos%mol_prop%natom
+      write(*,'(A,I2,A,3F15.8)') '[GRAD_DECOMP] atom ', dbg_i, ' 2e_grad = ', &
+        infos%atoms%grad(:,dbg_i) - grad_1e(:,dbg_i)
+    end do
+    deallocate(grad_1e)
+
+    ! DEBUG: print final gradient (1e + 2e)
+    write(*,'(A)') '[GRAD_DECOMP] === Final gradient (1e + 2e) ==='
+    do dbg_i = 1, infos%mol_prop%natom
+      write(*,'(A,I2,A,3F15.8)') '[GRAD_DECOMP] atom ', dbg_i, ' total   = ', infos%atoms%grad(:,dbg_i)
+    end do
 
     call print_gradient(infos)
 
@@ -243,7 +267,7 @@ contains
     type(basis_set) :: basis
     real(kind=dp), contiguous, target :: p(:,:,:), d(:,:,:), spc(:,:,:), v(:,:)
 
-    logical :: urohf, dft, umrsf
+    logical :: urohf, dft, uref
     real(kind=dp) :: scale_exch  !> HF scale in Reference
     real(kind=dp) :: scale_exch2 !> HF scale in Response
 
@@ -253,7 +277,7 @@ contains
 
     dft = infos%control%hamilton == 20 ! dft or hf
     urohf = infos%control%scftype >= 2
-    umrsf = infos%tddft%umrsf
+    uref = infos%control%scftype == 2
 
     scale_exch = 1.0_dp
     scale_exch2 = 1.0_dp
@@ -285,16 +309,14 @@ contains
     write(*, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
     write(*, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
        infos%tddft%spc_coco, infos%tddft%spc_ovov, infos%tddft%spc_coov
-    if (umrsf) then
+    if (uref) then
      gcomp = grd2_umrsf_compute_data_t( d2 = d &
                                       , p2 = p &
                                       , spc2 = spc &
                                       , nbf = basis%nbf &
                                       , hfscale = scale_exch &
                                       , hfscale2 = scale_exch2 &
-                                      , spcscale = [infos%tddft%spc_coco, &
-                                                    infos%tddft%spc_ovov, &
-                                                    infos%tddft%spc_coov] &
+                                      , spcscale = [infos%tddft%spc_coco, infos%tddft%spc_ovov, infos%tddft%spc_coov] &
                                       , mrst = infos%tddft%mult )
     else
      gcomp = grd2_mrsf_compute_data_t( d2 = d &
