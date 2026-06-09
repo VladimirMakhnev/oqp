@@ -1,6 +1,6 @@
 !> @brief L1 self-test for the two-electron spin-spin (SS) dipolar integral (SSC/ZFS, ssc-zfs).
 !>
-!> Validation harness only. For a set of (s,p) shell quartets of the input molecule it compares,
+!> Validation harness only. For a set of (s,p,d) shell quartets of the input molecule it compares,
 !> per primitive quartet and per Cartesian function combination, the ANALYTIC SS bare-Hessian
 !> integral H_kl (mod_ssc_int2::comp_ssc_int2_prim) against a central-difference + Richardson
 !> reference built from the engine's OWN Coulomb ERI with electron 2 rigidly displaced
@@ -54,9 +54,12 @@ contains
     real(dp), allocatable :: ss(:,:,:)            ! analytic (nij,nkl,6)
     real(dp), allocatable :: e0(:,:), ep(:,:), em(:,:)
     real(dp), allocatable :: epp(:,:), epm(:,:), emp(:,:), emm(:,:)
+    real(dp), allocatable :: fdb1(:,:), fdb2(:,:), fdb3(:,:)
     real(dp) :: href_kl, rel, trc, scale
     real(dp) :: worst_rel, worst_trace, worst_an, worst_ref, worst_scale
-    integer  :: worst_q(4), worst_comp
+    real(dp) :: worst_rel_sig                ! worst rel diff over non-negligible (scale>1e-9) blocks
+    integer  :: worst_q(4), worst_comp, worst_q_sig(4)
+    logical  :: signif
     integer  :: ntested, npass, nfail_alls, nfail_iandj
     integer  :: ios, u
     logical  :: ok
@@ -69,14 +72,21 @@ contains
     nshell = basis%nshell
     tol = huge(1.0_dp)          ! no screening in the self-test
 
-    ! ---- collect representative s/p shells, preferring distinct atoms ----
-    ! Exclude pathologically tight (core) primitives: their charge cloud is ~1/sqrt(alpha) wide,
-    ! so the operator-displacement FD reference is roundoff-limited and cannot validate to 1e-6.
-    ! (The analytic integral itself is validated to machine precision against the Python prototype
-    ! for the (ss|ss) case -- see tests/ssc_prototype_ssss.py and PROGRESS.md.)
+    ! ---- collect representative s/p/d shells, preferring angular-momentum variety ----
+    ! OpenQP uses CARTESIAN Gaussians (basis%naos = NUM_CART_BF), so a d shell is 6 cartesian
+    ! functions and CART_X(i,2) gives their powers directly -- no spherical-harmonic transform is
+    ! involved in the integral engine. Exclude pathologically tight (core) primitives: their charge
+    ! cloud is ~1/sqrt(alpha) wide, so the operator-displacement FD reference is roundoff-limited and
+    ! cannot validate to 1e-6 (the analytic path is identical and is covered by the prototype check).
     nrep = 0
-    ! first p shell with a non-tight leading primitive
+    ! one shell of each angular momentum d, p (highest first), non-tight leading primitive
     do sh = 1, nshell
+      if (basis%am(sh) == 2 .and. basis%ex(basis%g_offset(sh)) < 1.0e2_dp) then
+        nrep = nrep + 1; reps(nrep) = sh; exit
+      end if
+    end do
+    do sh = 1, nshell
+      if (nrep >= MAXREP) exit
       if (basis%am(sh) == 1 .and. basis%ex(basis%g_offset(sh)) < 1.0e2_dp) then
         nrep = nrep + 1; reps(nrep) = sh; exit
       end if
@@ -90,10 +100,10 @@ contains
         end if
       end if
     end do
-    ! pad with any remaining non-tight s/p shells
+    ! pad with any remaining non-tight s/p/d shells
     do sh = 1, nshell
       if (nrep >= MAXREP) exit
-      if (basis%am(sh) <= 1 .and. basis%ex(basis%g_offset(sh)) < 1.0e2_dp &
+      if (basis%am(sh) <= 2 .and. basis%ex(basis%g_offset(sh)) < 1.0e2_dp &
           .and. .not. any(reps(1:nrep) == sh)) then
         nrep = nrep + 1; reps(nrep) = sh
       end if
@@ -106,6 +116,7 @@ contains
     worst_trace = 0.0_dp
     worst_q = 0
     worst_an = 0.0_dp; worst_ref = 0.0_dp; worst_scale = 0.0_dp; worst_comp = 0
+    worst_rel_sig = 0.0_dp; worst_q_sig = 0
     ntested = 0
     npass = 0
     nfail_alls = 0
@@ -137,24 +148,29 @@ contains
             allocate(ss(nij, nkl, 6))
             call comp_ssc_int2_prim(cpij, ig, cpkl, kg, ss)
 
-            if (allocated(e0)) deallocate(e0, ep, em, epp, epm, emp, emm)
+            if (allocated(e0)) deallocate(e0, ep, em, epp, epm, emp, emm, fdb1, fdb2, fdb3)
             allocate(e0(nij,nkl), ep(nij,nkl), em(nij,nkl))
             allocate(epp(nij,nkl), epm(nij,nkl), emp(nij,nkl), emm(nij,nkl))
+            allocate(fdb1(nij,nkl), fdb2(nij,nkl), fdb3(nij,nkl))
 
-            ! scale: largest analytic component magnitude in this quartet block
-            scale = max(maxval(abs(ss)), 1.0e-14_dp)
+            ! Comparison reference magnitude = largest analytic component in this quartet block,
+            ! with an absolute floor: blocks whose SS integrals are all < 1e-9 are physically
+            ! negligible (vanishing by symmetry), so the FD noise (~1e-16) must be judged against an
+            ! absolute scale, not a relative one (else 1e-16/1e-16 ~ O(1) spurious "failures").
+            scale = max(maxval(abs(ss)), 1.0e-9_dp)
+            signif = maxval(abs(ss)) > 1.0e-9_dp    ! quartet has non-negligible SS integrals
 
             do comp = 1, 6
+              ! 3-level Richardson FD reference block (O(h^6)); FD blocks computed once per step.
+              call fd_block(ck(comp), cl(comp), h,        fdb1)
+              call fd_block(ck(comp), cl(comp), h*0.5_dp,  fdb2)
+              call fd_block(ck(comp), cl(comp), h*0.25_dp, fdb3)
               do ij = 1, nij
                 do kl = 1, nkl
-                  ! 3-level Richardson extrapolation (O(h^6)) of the central FD
                   block
-                    real(dp) :: f1, f2, f3, r1a, r1b
-                    f1 = fd_component(ck(comp), cl(comp), h,        ij, kl)
-                    f2 = fd_component(ck(comp), cl(comp), h*0.5_dp,  ij, kl)
-                    f3 = fd_component(ck(comp), cl(comp), h*0.25_dp, ij, kl)
-                    r1a = (4.0_dp*f2 - f1)/3.0_dp
-                    r1b = (4.0_dp*f3 - f2)/3.0_dp
+                    real(dp) :: r1a, r1b
+                    r1a = (4.0_dp*fdb2(ij,kl) - fdb1(ij,kl))/3.0_dp
+                    r1b = (4.0_dp*fdb3(ij,kl) - fdb2(ij,kl))/3.0_dp
                     href_kl = (16.0_dp*r1b - r1a)/15.0_dp
                   end block
                   ! relative to the integral block magnitude (sig figs vs the integral itself)
@@ -171,6 +187,9 @@ contains
                     worst_rel = rel; worst_q = [reps(a),reps(b),reps(c),reps(d)]
                     worst_an = ss(ij,kl,comp); worst_ref = href_kl
                     worst_scale = scale; worst_comp = comp
+                  end if
+                  if (signif .and. rel > worst_rel_sig) then
+                    worst_rel_sig = rel; worst_q_sig = [reps(a),reps(b),reps(c),reps(d)]
                   end if
                 end do
               end do
@@ -204,32 +223,31 @@ contains
 
   contains
 
-    !> Finite-difference of the engine ERI for component (k,l) at step hh, element (ij,kl).
-    function fd_component(k, l, hh, ielem, kelem) result(val)
-      integer,  intent(in) :: k, l, ielem, kelem
-      real(dp), intent(in) :: hh
-      real(dp) :: val, ds(3)
-      integer  :: kk, ll
-      kk = k; ll = l
+    !> Finite-difference block of H_kl (component k,l) at step hh: the whole (nij,nkl) matrix
+    !> at once (the displaced ERI blocks are computed once and reused across all elements).
+    subroutine fd_block(k, l, hh, out)
+      integer,  intent(in)  :: k, l
+      real(dp), intent(in)  :: hh
+      real(dp), intent(out) :: out(:,:)
+      real(dp) :: ds(3)
       if (k == l) then
         ! central second difference along axis k
-        ds = 0.0_dp; ds(kk) =  hh; call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, ep)
-        ds = 0.0_dp;                call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, e0)
-        ds = 0.0_dp; ds(kk) = -hh; call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, em)
-        val = (ep(ielem,kelem) - 2.0_dp*e0(ielem,kelem) + em(ielem,kelem))/(hh*hh)
+        ds = 0.0_dp; ds(k) =  hh; call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, ep)
+        ds = 0.0_dp;              call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, e0)
+        ds = 0.0_dp; ds(k) = -hh; call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, em)
+        out = (ep - 2.0_dp*e0 + em)/(hh*hh)
       else
-        ds = 0.0_dp; ds(kk) =  hh; ds(ll) =  hh
+        ds = 0.0_dp; ds(k) =  hh; ds(l) =  hh
         call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, epp)
-        ds = 0.0_dp; ds(kk) =  hh; ds(ll) = -hh
+        ds = 0.0_dp; ds(k) =  hh; ds(l) = -hh
         call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, epm)
-        ds = 0.0_dp; ds(kk) = -hh; ds(ll) =  hh
+        ds = 0.0_dp; ds(k) = -hh; ds(l) =  hh
         call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, emp)
-        ds = 0.0_dp; ds(kk) = -hh; ds(ll) = -hh
+        ds = 0.0_dp; ds(k) = -hh; ds(l) = -hh
         call comp_eri2_prim_disp(cpij, ig, cpkl, kg, ds, emm)
-        val = (epp(ielem,kelem) - epm(ielem,kelem) - emp(ielem,kelem) + emm(ielem,kelem)) &
-              /(4.0_dp*hh*hh)
+        out = (epp - epm - emp + emm)/(4.0_dp*hh*hh)
       end if
-    end function fd_component
+    end subroutine fd_block
 
     subroutine report(unit)
       integer, intent(in) :: unit
@@ -244,6 +262,8 @@ contains
       write(unit,'(A,ES12.4)')  ' worst analytic-vs-FD rel diff  : ', worst_rel
       write(unit,'(A,4I4,A,I0)')'   at shell quartet (i j k l)   : ', worst_q, '  comp=', worst_comp
       write(unit,'(A,3ES14.6)') '   analytic / FD / block-scale  : ', worst_an, worst_ref, worst_scale
+      write(unit,'(A,ES12.4,A,4I4)') ' worst rel diff, non-negligible : ', worst_rel_sig, &
+        '   at quartet ', worst_q_sig
       write(unit,'(A,ES12.4)')  ' worst |Tr(S)| (traceless inv.) : ', worst_trace
       write(unit,'(A,ES10.2)')    ' FD base step last quartet (h) : ', h
       write(unit,'(A)')           ' (adaptive h=min(0.02,0.1/sqrt(rho)); 3-level Richardson h,h/2,h/4)'

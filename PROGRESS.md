@@ -9,7 +9,9 @@
 - **Branch:** `ssc-zfs` (off `SSC` @ baseline 222/225 tests passing).
 - **Phase:** 1 — L1 integral implemented (P1.2 done). P1.3 self-test PASSES in testing; the L1
   **stage gate is NOT yet declared** — awaiting human confirmation (per session instruction).
-- **Gate cleared:** none yet. **L1 self-test passes but is NOT marked passed pending confirmation.**
+- **Gate cleared:** **L1 ☑ (s,p,d; human-confirmed for s,p 2026-06-09; d extended same day).**
+- **NOW:** starting **Phase 2 / P2.1** (the `{P_μν P_κτ − P_μκ P_ντ}` contraction + ROHF density).
+  Per instruction: do NOT attempt the L2 O₂ pin yet — stop before L2.
 - **NEXT STEP:** await confirmation of L1. On confirmation, mark L1 ☑ and begin **Phase 2 / P2.1**
   (the `{P_μν P_κτ − P_μκ P_ντ}` contraction + ROHF; then pin `C` on O₂ at L2). Possible follow-up
   before L2: extend the SS integral / FD self-test to **d shells** (currently s,p validated;
@@ -53,7 +55,16 @@
   - Key correctness fact pinned: operator displacement must enter **only** the Boys argument and
     the VRR centres, **not** the engine's `expe` Gaussian prefactor (that prefactor is a fixed-orbital
     normalisation; letting `dshift` leak into it injects a spurious `−2·ERI` second-derivative term).
-- ◐ **P1.3** L1 FD self-test: `source/modules/ssc_int2_selftest.F90` (`bind(C)`; declared in
+- ☑ **P1.3 / Gate L1 — PASSED (human-confirmed 2026-06-09; s,p,d all validated).**
+  - **d-shell extension (2026-06-09):** OpenQP uses **cartesian** Gaussians (`basis%naos = NUM_CART_BF`;
+    6d, 10f) so a d shell is 6 cartesian functions and `CART_X(i,2)` gives their powers directly —
+    **no spherical-harmonic transform exists in the integral engine**, so d needed only lifting the
+    `am≤1` restriction (the Rys/derivative code is angular-momentum-general). Self-test now covers
+    s,p,d quartets of H₂O/6-31G*: **87846/87846** comparisons agree at rel ≤ 1e-6; **worst rel diff
+    over non-negligible blocks = 1.5e-8** (≈7–8 sig figs); worst overall 9.7e-8 is a vanishing-by-
+    symmetry block (judged against a 1e-9 absolute floor); **worst |Tr(S)| = 2.2e-16**. The FD-block
+    refactor (compute each displaced ERI block once per step) keeps it fast (~3 s).
+  L1 FD self-test: `source/modules/ssc_int2_selftest.F90` (`bind(C)`; declared in
   `include/oqp.h`; driven by `tests/test_ssc_integrals_fd.py` via `oqp.ssc_int2_selftest`).
   Compares analytic `H_kl` to a **3-level Richardson FD of the engine's own ERI** for all s,p shell
   quartets of H₂O/6-31G*, and checks `Tr(S)=0`. **RESULT (run 2026-06-09, ssc-pyenv):**
@@ -84,6 +95,11 @@ Z-vector / relaxed densities, response/relaxation terms, analytic gradients of D
 ---
 
 ## RUNNING LOG  (newest first — one short entry per `-p` run)
+- 2026-06-09 — **L1 confirmed (s,p) + extended to d; gate ☑.** Human confirmed L1 for s,p. Found
+  OpenQP is fully **cartesian** (no spherical transform), so extended the SS integral + FD self-test
+  to **d** shells by lifting the `am≤1` cap and refactoring the FD to compute displaced-ERI blocks
+  once per step (fast). Result: **87846/87846** agree ≤1e-6, worst non-negligible **1.5e-8**,
+  worst |Tr(S)| **2.2e-16**. Marked L1 ☑ (s,p,d). NEXT: P2.1 contraction + ROHF (stop before L2).
 - 2026-06-09 — **P1.2 done; P1.3 self-test PASSES (gate not declared).** Implemented the native
   SS dipolar 2e integral (`source/integrals/mod_ssc_int2.F90`) via Path A and an `bind(C)` L1
   self-test (`source/modules/ssc_int2_selftest.F90`, `include/oqp.h`, `tests/test_ssc_integrals_fd.py`).
