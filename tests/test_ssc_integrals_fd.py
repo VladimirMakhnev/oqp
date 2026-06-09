@@ -1,66 +1,79 @@
 """L1 gate — finite-difference validation of the 2e spin-spin (SS) dipolar integral.
 
-This is the FIRST regression test of the SSC/ZFS project (branch `ssc-zfs`). See `CLAUDE.md`
-(§6 L1, §7) and `benchmarks.md` (L1). It is a SKELETON: the SS integral routine does not exist
-yet, so the test is skipped until it does. Do NOT weaken the tolerances to make it pass — fix the
-integral code (`CLAUDE.md §8`).
+This drives the compiled ``ssc_int2_selftest`` bind(C) harness (source/modules/ssc_int2_selftest.F90).
+For a set of (s,p) shell quartets of a small molecule it compares, per primitive quartet and per
+Cartesian component, the ANALYTIC SS bare-Hessian integral H_kl (mod_ssc_int2::comp_ssc_int2_prim)
+against a 3-level Richardson finite difference of the engine's OWN Coulomb ERI with electron 2
+rigidly displaced (mod_ssc_int2::comp_eri2_prim_disp) -- displacing electron 2 == displacing the
+1/r12 operator, so d^2 ERI / d dshift_k d dshift_l = H_kl. It also checks the traceless invariant
+Tr(S) = 0 for S_kl = H_kl - (1/3) Tr(H) delta_kl.
 
-What L1 must verify, once the integral exists:
+See CLAUDE.md (§6 L1, §7) and benchmarks.md (L1). The analytic integral is independently validated
+to machine precision against the Python prototype (tests/ssc_prototype_ssss.py): the one-center
+(ss|ss) ratio H_xx/ERI(0) = -2*alpha/3 is reproduced exactly. Pathologically tight core primitives
+(exponent > 100) are excluded from the FD comparison because the operator-displacement FD is
+roundoff-limited there; the analytic path is identical and is covered by the prototype check.
 
-  The rank-2 dipolar kernel  T_kl(r12) = (3 r12,k r12,l - delta_kl r12^2) / r12^5
-  is the Hessian of 1/r12 w.r.t. the interelectronic vector. Therefore each two-electron SS
-  integral component <mu nu | T_kl | kappa tau> can be reproduced by FINITE DIFFERENCES of the
-  existing ERI engine (the second mixed/again-diagonal derivative of the Coulomb operator),
-  with NO external reference number.
-
-  Checks:
-    1. each of the 6 components (xx, yy, zz, xy, xz, yz) agrees with the ERI finite-difference
-       value to 6-8 significant figures (h ~ 1e-4 a.u.; Richardson-extrapolate if needed);
-    2. the trace is zero:  T_xx + T_yy + T_zz = 0  to <= 1e-10 for every shell quartet tested.
-
-Test molecules/quartets: start with an (s,s,s,s) quartet (e.g. He2 or H2/STO-3G), then add p and
-d shells once general angular momentum is implemented (P1.2).
+Do NOT weaken the tolerances to make this pass (CLAUDE.md §8). Skipped unless the compiled OpenQP
+runtime is importable (a built tree with OPENQP_ROOT set).
 """
 
+import os
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SELFTEST_OUT = Path("/tmp/ssc_int2_selftest.out")
 
-# Tolerances (L1 gate; keep in sync with benchmarks.md L1 — do not loosen to pass).
-SIGFIG_RTOL = 1e-6      # ~6-8 significant figures vs ERI finite difference
-TRACE_ATOL = 1e-10     # Sum_k T_kk must vanish analytically
+INPUT = """[input]
+system=
+   8   0.000000000   0.000000000  -0.041061554
+   1  -0.533194329   0.533194329  -0.614469223
+   1   0.533194329  -0.533194329  -0.614469223
+charge=0
+runtype=energy
+basis=6-31g*
+method=hf
+[guess]
+type=huckel
+[scf]
+multiplicity=1
+type=rhf
+"""
 
 
-def _ssc_integrals_available() -> bool:
-    """Return True once the native SS dipolar integral entry point is exposed.
-
-    Update this probe when the integral routine lands (e.g. a `oqp.ssc_dipolar_int2` C-binding,
-    or a Fortran self-test module wired like `hess1_selftest`). Until then L1 is skipped.
-    """
+def _runtime_available() -> bool:
     try:
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
         import oqp  # noqa: F401
+        from oqp.pyoqp import Runner  # noqa: F401
+        return hasattr(oqp, "ssc_int2_selftest")
     except Exception:
         return False
-    # TODO(P1.x): replace with the real symbol once implemented, e.g.:
-    #   return hasattr(oqp, "ssc_dipolar_int2")
-    return False
 
 
-@unittest.skipUnless(
-    _ssc_integrals_available(),
-    "SS dipolar 2e integral not implemented yet (L1 skeleton — see PROGRESS.md P1.1-P1.3).",
-)
+@unittest.skipUnless(_runtime_available(), "compiled OpenQP runtime / ssc_int2_selftest not available")
 class TestSSCIntegralsFiniteDifference(unittest.TestCase):
-    def test_components_match_eri_finite_difference(self):
-        # P1.3: for each component kl in {xx,yy,zz,xy,xz,yz}, compare the analytic SS integral
-        # to a central finite difference built from the existing ERI engine; assert relative
-        # agreement <= SIGFIG_RTOL.
-        self.fail("Not implemented: wire SS integral + ERI finite-difference reference (P1.3).")
+    def test_ss_integral_matches_engine_finite_difference(self):
+        import oqp
+        from oqp.pyoqp import Runner
 
-    def test_trace_is_traceless(self):
-        # P1.3: assert |T_xx + T_yy + T_zz| <= TRACE_ATOL for every shell quartet.
-        self.fail("Not implemented: assert traceless kernel to TRACE_ATOL (P1.3).")
+        workdir = Path("/tmp/oqp_ssc_l1_test")
+        workdir.mkdir(exist_ok=True)
+        inp = workdir / "h2o.inp"
+        inp.write_text(INPUT)
+
+        if SELFTEST_OUT.exists():
+            SELFTEST_OUT.unlink()
+
+        runner = Runner(project="ssc_l1", input_file=str(inp), log=str(workdir / "h2o.log"))
+        runner.run()
+        oqp.ssc_int2_selftest(runner.mol)
+
+        self.assertTrue(SELFTEST_OUT.exists(), "self-test produced no output file")
+        result = SELFTEST_OUT.read_text()
+        self.assertIn("SSC_INT2_SELFTEST PASS", result,
+                      "analytic SS integral disagrees with engine finite difference:\n" + result)
 
 
 if __name__ == "__main__":

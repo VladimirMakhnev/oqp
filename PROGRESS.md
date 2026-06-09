@@ -7,13 +7,13 @@
 ## CURRENT STATUS
 
 - **Branch:** `ssc-zfs` (off `SSC` @ baseline 222/225 tests passing).
-- **Phase:** 1 — L1 integral work in progress. P1.1 done (route decided + closed form derived and
-  numerically validated against analytic oracles). Native Fortran integral NOT started.
-- **Gate cleared:** none yet. (P1.1 is a decision/prototype task; it is NOT a stage gate.)
-- **NEXT STEP:** **P1.2** — implement the SS dipolar 2e integral in OpenQP via **Path A** (drive
-  the ERI engine with the Hessian-of-1/r₁₂ kernel) for general angular momenta, reusing
-  `rys_deriv.F90` / `grd2_rys.F90`. Then **P1.3** = the real L1 gate: FD vs OpenQP's *actual* ERI
-  engine (the prototype below already proves the closed form is right; P1.3 proves the Fortran is).
+- **Phase:** 1 — L1 integral implemented (P1.2 done). P1.3 self-test PASSES in testing; the L1
+  **stage gate is NOT yet declared** — awaiting human confirmation (per session instruction).
+- **Gate cleared:** none yet. **L1 self-test passes but is NOT marked passed pending confirmation.**
+- **NEXT STEP:** await confirmation of L1. On confirmation, mark L1 ☑ and begin **Phase 2 / P2.1**
+  (the `{P_μν P_κτ − P_μκ P_ντ}` contraction + ROHF; then pin `C` on O₂ at L2). Possible follow-up
+  before L2: extend the SS integral / FD self-test to **d shells** (currently s,p validated;
+  spherical-harmonic d deferred).
 
 ---
 
@@ -41,10 +41,29 @@
     `Tr(H)=−1.904324 = −4πO` (contact identity) ✓. All four self-checks PASS.
   - Correction logged: the t-quadrature (Gaussian transform) reproduces **H** (contact included),
     not S — same as the FD route; both equal the closed-form H. S is then traceless(H).
-- ☐ **P1.2** Implement all 6 components for general angular momenta (reuse `rys_deriv.F90` /
-  `grd2_rys.F90` or `comp_soc_int2_prim`).
-- ☐ **P1.3** L1 FD test: compare to finite differences of the ERI engine to 6–8 sig figs;
-  assert `trace = 0` to ~1e-10. **Gate L1.**
+- ☑ **P1.2** Native Fortran SS dipolar 2e integral implemented for general angular momenta.
+  - New isolated module `source/integrals/mod_ssc_int2.F90` (does not perturb the tested SOC path):
+    - `qgauss_ss` — padded Rys 2e 1D-table builder (electron 1 AND electron 2 padded +1), modelled
+      on `QGaussRys2e`/`comp_soc_int2_prim` (`mod_1e_primitives.F90`); supports an electron-2 rigid
+      operator displacement for the FD reference.
+    - `comp_ssc_int2_prim` — assembles the 6 bare-Hessian components `H_kl` via the working identity
+      `H_kl = −⟨∂_k(μν)|1/r₁₂|∂_l(κτ)⟩` (one first-derivative on each electron; reuses the SOC-style
+      `soc_xyz_ij` derivative pattern as `e1d`/`e2d`/`e12d`). Physical `S = traceless(H)`.
+    - `comp_eri2_prim_disp` — plain ERI with electron-2 displaced (the FD reference).
+  - Key correctness fact pinned: operator displacement must enter **only** the Boys argument and
+    the VRR centres, **not** the engine's `expe` Gaussian prefactor (that prefactor is a fixed-orbital
+    normalisation; letting `dshift` leak into it injects a spurious `−2·ERI` second-derivative term).
+- ◐ **P1.3** L1 FD self-test: `source/modules/ssc_int2_selftest.F90` (`bind(C)`; declared in
+  `include/oqp.h`; driven by `tests/test_ssc_integrals_fd.py` via `oqp.ssc_int2_selftest`).
+  Compares analytic `H_kl` to a **3-level Richardson FD of the engine's own ERI** for all s,p shell
+  quartets of H₂O/6-31G*, and checks `Tr(S)=0`. **RESULT (run 2026-06-09, ssc-pyenv):**
+  - **7776 / 7776** element comparisons agree at rel ≤ 1e-6; **worst rel diff = 1.29e-9**.
+  - **worst |Tr(S)| = 1.3e-18** (traceless invariant, machine zero).
+  - Independent machine-precision check: one-center `(ss|ss)` ratio `H_xx/ERI(0) = −2α/3` reproduced
+    exactly vs the Python prototype, for every tested exponent.
+  - Pathologically tight core primitives (exp > 100) excluded from FD (operator-displacement FD is
+    roundoff-limited there; analytic path identical, covered by the prototype check). d shells
+    deferred (spherical-harmonic transform). **Gate L1 — NOT declared; awaiting confirmation.**
 
 ## PHASE 2 — L2: contraction + ROHF, pin `C`  (gate: §7 L2)
 - ☐ **P2.1** Build the `{P_μν P_κτ − P_μκ P_ντ}` contraction as a Fock/K-like consumer
@@ -65,6 +84,16 @@ Z-vector / relaxed densities, response/relaxation terms, analytic gradients of D
 ---
 
 ## RUNNING LOG  (newest first — one short entry per `-p` run)
+- 2026-06-09 — **P1.2 done; P1.3 self-test PASSES (gate not declared).** Implemented the native
+  SS dipolar 2e integral (`source/integrals/mod_ssc_int2.F90`) via Path A and an `bind(C)` L1
+  self-test (`source/modules/ssc_int2_selftest.F90`, `include/oqp.h`, `tests/test_ssc_integrals_fd.py`).
+  The self-test finite-differences OpenQP's own ERI engine (3-level Richardson, operator displaced
+  via rigid electron-2 shift) and compares to the analytic SS integral: **7776/7776 components agree
+  to rel ≤ 1e-6, worst 1.29e-9; Tr(S)=1.3e-18**; one-center `H_xx/ERI(0)=−2α/3` matches the prototype
+  exactly. Debug story: found+fixed a spurious `exp(−|P−Q|²)` term leaking the operator displacement
+  into the prefactor (froze `expe` at the undisplaced geometry); core primitives excluded from FD
+  (roundoff), d shells deferred. **Per instruction, L1 NOT marked passed — showing numbers, awaiting
+  human confirmation.** NEXT: confirm L1 → Phase 2 (P2.1 contraction + ROHF).
 - 2026-06-09 — **P1.1 done.** Decided **Path A** (SS 2e integral = Hessian of 1/r₁₂ → reuse ERI
   engine). Derived the closed form for the (s,s,s,s) quartet and wrote a standalone prototype
   `tests/ssc_prototype_ssss.py` triangulating it three independent ways: closed form (Boys F₁,F₂),
