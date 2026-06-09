@@ -29,6 +29,15 @@ module tdhf_mrsf_lib
 
     end type
 
+  ! probe: swap the same-spin generalized-Fock spin label in the J (umrsf_sfrolhs)
+  ! 0=baseline(Block1 OV_a->fb, Block3 CO_b->fa); 1=swap(fa<->fb); 2=Fbar=(fa+fb)/2. RO-safe.
+    integer, public :: umrsf_dbg_jswap = 0
+  ! probe: swap the CROSS-spin Fock couplings in the J. 0=baseline; 1=B1 cross fa->fb;
+  ! 2=B2 CVa fb->fa; 3=B3 cross fb->fa; 4=B4 CVb fa->fb; 5=B1&B4 (OVa<->CVb pair) swap. RO-safe.
+    integer, public :: umrsf_dbg_jswap2 = 0
+  ! probe: W-builder W_xa wb O-O Fock spin label. 0=baseline(-fb); 1=swap(-fa); 2=Fbar. RO-safe.
+    integer, public :: umrsf_dbg_wswap = 0
+
 contains
 
 !###############################################################################
@@ -2554,6 +2563,527 @@ end subroutine umrsfmntoia
     return
 
   end subroutine mrsfqrowcal
+
+!###############################################################################
+!  UMRSF-TDDFT analytic gradient builders (UHF reference).
+!  New routines, prefix `umrsf`. Golden reference: RO mrst=1/3 path
+!  (sfrorhs/mrsfsp/sfropcal/mrsfrowcal). Theory: umrsf_gradient_theory.tex (RU).
+!###############################################################################
+
+!> @brief UMRSF Q-builder: Q^(k)_{tu,sigma} for both spins, all blocks.
+!> @details Naive direct implementation of §8 (eq:Qixa..eq:Qab)
+!>          umrsf_gradient_theory.tex. For every block:
+!>              Q_{tu,sigma} = [t<=noca] H^+[T]_{tu,sigma}
+!>                           + 2 H[X,X]_{tu,sigma}
+!>                           + 2 F[X,X]_{tu,sigma}
+!>          - H^+[T] term present only when the first index t in C u O (t<=noca):
+!>            §8.4/8.6/8.9 drop it for blocks ai/ax/ab (first index in V) because
+!>            those Q blocks are defined without H^+[T].
+!>          - 2 H[X,X] present in every block (full nbf x nbf, native scale on input).
+!>          - F[X,X] (eq:FX) built inline; it is self-masking: F^alpha is nonzero
+!>            only for t,u in C u O and F^beta only for t,u in O u V, because the
+!>            transition amplitude X has its first index in C u O and second in O u V.
+!>          Inputs are full nbf x nbf MO matrices (naive form; numerical packing is
+!>          a later optimisation, project rule 4).
+!>  @param[out] qa,qb     Q_{tu,alpha}, Q_{tu,beta}  (nbf x nbf, MO)
+!>  @param[in]  hpta,hptb H^+[T]_alpha,_beta         (nbf x nbf, MO)
+!>  @param[in]  hxa,hxb   H[X,X]_alpha,_beta (A0 ERI + spin-pairing, factor-2 scale)
+!>  @param[in]  fa,fb     UKS Fock alpha,beta        (nbf x nbf, MO)
+!>  @param[in]  tij       T_alpha over C u O          (noca x noca)
+!>  @param[in]  tab       T_beta  over O u V          (nvirb x nvirb)
+!>  The Fock-difference-density term of H^(0) (eq:H0, the delta-Fock parts) is the
+!>  golden `2 fa.Ta` / `2 fb.Tb` contraction (matching RO sfrorhs), NOT the X.f.X
+!>  bilinear: those are the same algebra via T=-XX but the golden form is exact here.
+  subroutine umrsfqcal(qa, qb, hpta, hptb, hxa, hxb, fa, fb, tij, tab, noca, nocb)
+
+    use precision, only: dp
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: qa, qb
+    real(kind=dp), intent(in),  dimension(:,:) :: hpta, hptb
+    real(kind=dp), intent(in),  dimension(:,:) :: hxa, hxb
+    real(kind=dp), intent(in),  dimension(:,:) :: fa, fb
+    real(kind=dp), intent(in),  dimension(:,:) :: tij, tab
+    integer, intent(in) :: noca, nocb
+
+    real(kind=dp), allocatable, dimension(:,:) :: tbig
+    integer :: nbf, t, u
+
+    nbf = ubound(qa, 1)
+    allocate(tbig(nbf,nbf), source=0.0_dp)
+
+  ! 2 H[X,X] (already factor-2 scaled on input)
+    qa = hxa
+    qb = hxb
+
+  ! H^+[T], first index in C u O only (masked off for blocks ai/ax/ab)
+    do u = 1, nbf
+      do t = 1, noca
+        qa(t,u) = qa(t,u) + hpta(t,u)
+        qb(t,u) = qb(t,u) + hptb(t,u)
+      end do
+    end do
+
+  ! Fock-difference-density term, alpha: qa += 2 fa.Ta  (Ta over C u O)
+    tbig = 0.0_dp; tbig(1:noca,1:noca) = tij
+    call dgemm('n','n', nbf, nbf, nbf, 2.0_dp, fa, nbf, tbig, nbf, 1.0_dp, qa, nbf)
+
+  ! Fock-difference-density term, beta: qb += 2 fb.Tb  (Tb over O u V)
+    tbig = 0.0_dp; tbig(nocb+1:nbf,nocb+1:nbf) = tab
+    call dgemm('n','n', nbf, nbf, nbf, 2.0_dp, fb, nbf, tbig, nbf, 1.0_dp, qb, nbf)
+
+    deallocate(tbig)
+
+    return
+
+  end subroutine umrsfqcal
+
+!> @brief UMRSF Z-vector RHS builder: R^(k)_{pq,sigma} = Q_{pq,sigma}-Q_{qp,sigma},
+!>        stored as the right-hand side of J*Z = -R (already negated).
+!> @note  Theory §9 writes R = Q - Q^T and notes H^+[T] cancels by symmetry, so
+!>        §9 boxes omit it. We build the full Q (with H^+[T]) in umrsfqcal and form
+!>        R = Q - Q^T here: an algebraically equivalent form that matches the golden
+!>        RO sfrorhs (which keeps H^+[T] term-by-term). The RO-limit test
+!>        (1/2(R_alpha+R_beta) == sfrorhs) verifies this equivalence numerically.
+!> @details Spin-explicit 4-active-block layout, alpha blocks first then beta
+!>          (project decision 2026-06-02). Dimension
+!>          lzdim = n_O*n_V + n_C*n_V + n_C*n_O + n_C*n_V, with
+!>          C=[1,nocb], O=[nocb+1,noca], V=[noca+1,nbf].
+!>          Block order and loop nesting mirror RO sfrolhs so the Phase-3
+!>          J-operator can read the same packing.
+!>  Соответствует формулам (eq:Rxa_alpha, eq:Ria_alpha, eq:Rix_beta, eq:Ria_beta)
+!>  §9 umrsf_gradient_theory.tex.
+!> @param[out] rhs   packed RHS, length lzdim
+!> @param[in]  qa    Q^(k)_{tu,alpha} in MO basis, nbf x nbf (from umrsfqcal)
+!> @param[in]  qb    Q^(k)_{tu,beta}  in MO basis, nbf x nbf (from umrsfqcal)
+  subroutine umrsfqrorhs(rhs, qa, qb, noca, nocb)
+
+    use precision, only: dp
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: rhs
+    real(kind=dp), intent(in),  dimension(:,:) :: qa, qb
+    integer, intent(in) :: noca, nocb
+
+    integer :: nbf, ij, i, x, a
+
+    nbf = ubound(qa, 1)
+    ij = 0
+
+  ! Block 1 - OV, alpha : Z_xa_alpha  (eq:Rxa_alpha)
+  !   x in O=[nocb+1,noca], a in V=[noca+1,nbf]; a outer, x inner (sfrolhs order)
+    do a = noca+1, nbf
+      do x = nocb+1, noca
+        ij = ij+1
+        rhs(ij) = -(qa(x,a) - qa(a,x))
+      end do
+    end do
+
+  ! Block 2 - CV, alpha : Z_ia_alpha  (eq:Ria_alpha)
+  !   i in C=[1,nocb], a in V=[noca+1,nbf]; a outer, i inner
+    do a = noca+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        rhs(ij) = -(qa(i,a) - qa(a,i))
+      end do
+    end do
+
+  ! Block 3 - CO, beta : Z_ix_beta  (eq:Rix_beta)
+  !   i in C=[1,nocb], x in O=[nocb+1,noca]; x outer, i inner
+    do x = nocb+1, noca
+      do i = 1, nocb
+        ij = ij+1
+        rhs(ij) = -(qb(i,x) - qb(x,i))
+      end do
+    end do
+
+  ! Block 4 - CV, beta : Z_ia_beta  (eq:Ria_beta)
+  !   i in C=[1,nocb], a in V=[noca+1,nbf]; a outer, i inner
+    do a = noca+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        rhs(ij) = -(qb(i,a) - qb(a,i))
+      end do
+    end do
+
+    return
+
+  end subroutine umrsfqrorhs
+
+!> @brief UMRSF Z-vector density generator: 4-block Z -> alpha/beta MO densities.
+!> @details Generalizes RO sfrogen (tdhf_sf_lib): RO's single CV parameter drives
+!>          both spins; here CV is split into independent CV_alpha (-> ava) and
+!>          CV_beta (-> avb). Block order matches umrsfqrorhs exactly (OV_a, CV_a,
+!>          CO_b, CV_b). Density convention (occ_row, virt_col) per spin:
+!>          alpha occ=C u O, virt=V ; beta occ=C, virt=O u V.
+!>  Соответствует §6 (eq:Zvec) umrsf_gradient_theory.tex.
+!> @param[out] ava,avb   alpha/beta MO rotation densities (nbf x nbf)
+!> @param[in]  pv        packed 4-block Z-vector, length lzdim_u
+  subroutine umrsf_sfrogen(ava, avb, pv, noca, nocb)
+
+    use precision, only: dp
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: ava, avb
+    real(kind=dp), intent(in),  dimension(:)   :: pv
+    integer, intent(in) :: noca, nocb
+
+    integer :: ij, i, x, a, nbf
+
+    nbf = ubound(ava, 1)
+    ava = 0.0_dp
+    avb = 0.0_dp
+    ij = 0
+
+  ! Block 1 - OV_alpha : x in O=[nocb+1,noca], a in V=[noca+1,nbf]; a outer, x inner
+    do a = noca+1, nbf
+      do x = nocb+1, noca
+        ij = ij+1
+        ava(x,a) = pv(ij)
+      end do
+    end do
+
+  ! Block 2 - CV_alpha : i in C=[1,nocb], a in V; a outer, i inner
+    do a = noca+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        ava(i,a) = pv(ij)
+      end do
+    end do
+
+  ! Block 3 - CO_beta : i in C, x in O; x outer, i inner
+    do x = nocb+1, noca
+      do i = 1, nocb
+        ij = ij+1
+        avb(i,x) = pv(ij)
+      end do
+    end do
+
+  ! Block 4 - CV_beta : i in C, a in V; a outer, i inner
+    do a = noca+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        avb(i,a) = pv(ij)
+      end do
+    end do
+
+  end subroutine umrsf_sfrogen
+
+!> @brief UMRSF Z-vector LHS operator: pmo = J . z  in the 4-block layout.
+!> @details Per active block, J.z = (same-spin generalized-Fock commutator) +
+!>          resp_scale * Hp_tu,sigma[z], where Hp = the (A+B) ERI + f^xc response
+!>          (hpza for alpha blocks, hpzb for beta blocks) already carries the
+!>          cross-spin Coulomb + f^xc_alphabeta coupling from the shared int2 run.
+!>          Implemented as a faithful spin-resolution of RO sfrolhs (tdhf_sf_lib):
+!>          OV_alpha == RO socc-virt, CO_beta == RO doc-socc (both spin-pure, so they
+!>          reproduce RO exactly in the alpha=beta limit), and the RO doc-virt block
+!>          is SPLIT into CV_alpha (keeps hpza + the fb.z_CO coupling) and CV_beta
+!>          (keeps hpzb + the fa.z_OV coupling) - matching the section10 W boxes:
+!>            CV_a += sum_x F_xa,beta Z_ix,beta ;  CV_b += sum_x F_ix,alpha Z_xa,alpha.
+!>          Diagonal uses the canonical orbital energies (e_a/e_b); the Fock-coupling
+!>          terms and the (A+B) response are scaled by 0.5 (RO wrk*0.5 normalization).
+!>          Spaces: alpha occ=C u O virt=V ; beta occ=C virt=O u V.
+!>  Соответствует §6/§10 (eq:master, eq:Zvec, W-блоки) umrsf_gradient_theory.tex.
+!> @param[out] pmo     J.z, packed 4-block, length lzdim_u
+!> @param[in]  z       Z-vector, packed 4-block
+!> @param[in]  e_a,e_b orbital energies alpha/beta (nbf)
+!> @param[in]  fa,fb   MO Fock alpha/beta (nbf x nbf)
+!> @param[in]  hpza    alpha (A+B) response, nocca x nvira (mntoia output)
+!> @param[in]  hpzb    beta  (A+B) response, noccb x nvirb
+  subroutine umrsf_sfrolhs(pmo, z, e_a, e_b, fa, fb, hpza, hpzb, noca, nocb)
+
+    use precision, only: dp
+    use messages, only: show_message, with_abort
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:)   :: pmo
+    real(kind=dp), intent(in),  dimension(:)   :: z
+    real(kind=dp), intent(in),  dimension(:)   :: e_a, e_b
+    real(kind=dp), intent(in),  dimension(:,:) :: fa, fb
+    real(kind=dp), intent(in),  dimension(:,:) :: hpza, hpzb
+    integer, intent(in) :: noca, nocb
+
+  ! hs=0.5 is the A+B->H~ operator normalization (NOT the F_bar averaging): hs=1.0 collapses
+  ! the J min-eigenvalue to ~7e-4 and blows Z to ~111 (falsified 2026-06). hpza is already
+  ! the coefficient-1 response per eq(36); the per-spin J reduces to RO golden at this scale.
+    real(kind=dp), parameter :: hs = 0.5_dp
+    real(kind=dp), allocatable :: za(:,:), zb(:,:)
+    integer :: nbf, ij, i, x, a, y, j, b
+    real(kind=dp) :: w
+
+    real(kind=dp), allocatable :: f1(:,:), f3(:,:)   ! probe: effective same-spin gen-Fock
+    real(kind=dp), allocatable :: fc1(:,:), fc2(:,:), fc3(:,:), fc4(:,:)  ! cross couplings
+    logical :: s1, s2, s3, s4
+    nbf = ubound(fa, 1)
+    allocate(za(nbf,nbf), zb(nbf,nbf), source=0.0_dp)
+    allocate(f1(nbf,nbf), f3(nbf,nbf))
+    select case (umrsf_dbg_jswap)            ! Block1 OV_a uses f1, Block3 CO_b uses f3
+      case (1);      f1 = fa;                  f3 = fb                  ! both swap
+      case (2);      f1 = 0.5_dp*(fa+fb);      f3 = 0.5_dp*(fa+fb)      ! both Fbar
+      case (3);      f1 = fa;                  f3 = fa                  ! only Block1 swap
+      case (4);      f1 = fb;                  f3 = fb                  ! only Block3 swap
+      case (5);      f1 = 0.5_dp*(fa+fb);      f3 = fa                  ! only Block1 Fbar
+      case (6);      f1 = fb;                  f3 = 0.5_dp*(fa+fb)      ! only Block3 Fbar
+      case default;  f1 = fb;                  f3 = fa                  ! baseline
+    end select
+    allocate(fc1(nbf,nbf), fc2(nbf,nbf), fc3(nbf,nbf), fc4(nbf,nbf))
+    s1 = (umrsf_dbg_jswap2==1 .or. umrsf_dbg_jswap2==5)
+    s2 = (umrsf_dbg_jswap2==2)
+    s3 = (umrsf_dbg_jswap2==3)
+    s4 = (umrsf_dbg_jswap2==4 .or. umrsf_dbg_jswap2==5)
+    fc1 = merge(fb, fa, s1)   ! Block1 cross baseline fa
+    fc2 = merge(fa, fb, s2)   ! Block2 CVa baseline fb
+    fc3 = merge(fa, fb, s3)   ! Block3 cross baseline fb
+    fc4 = merge(fb, fa, s4)   ! Block4 CVb baseline fa
+
+  ! alpha rotation density za (OV_a + CV_a), beta density zb (CO_b + CV_b)
+    call umrsf_sfrogen(za, zb, z, noca, nocb)
+
+    ij = 0
+
+  ! Block 1 - OV_alpha (x in O, a in V): RO socc-virt, spin-resolved.
+    do a = noca+1, nbf
+      do x = nocb+1, noca
+        w = hpza(x, a-noca)
+        do y = nocb+1, noca                 ! + fb(O,O) . z_OV(O,V)  [f1 probe]
+          w = w + f1(y,x)*za(y,a)
+        end do
+        do j = 1, nocb                       ! - fa(C,V).z_CO  - fa(C,O).z_CV_beta [fc1]
+          w = w - fc1(j,a)*zb(j,x) - fc1(j,x)*zb(j,a)
+        end do
+        do b = noca+1, nbf                   ! - fb(V,V) . z_OV  [f1 probe]
+          w = w - f1(b,a)*za(x,b)
+        end do
+        ij = ij+1
+        pmo(ij) = (e_a(a)-e_a(x))*z(ij) + hs*w
+      end do
+    end do
+
+  ! Block 2 - CV_alpha (i in C, a in V): alpha part of RO doc-virt.
+    do a = noca+1, nbf
+      do i = 1, nocb
+        w = hpza(i, a-noca)
+        do y = nocb+1, noca                  ! + fb(O,V) . z_CO  (-> couples to CO_beta) [fc2]
+          w = w + fc2(y,a)*zb(i,y)
+        end do
+        ij = ij+1
+        pmo(ij) = (e_a(a)-e_a(i))*z(ij) + hs*w
+      end do
+    end do
+
+  ! Block 3 - CO_beta (i in C, x in O): RO doc-socc, spin-resolved.
+    do x = nocb+1, noca
+      do i = 1, nocb
+        w = hpzb(i, x-nocb)
+        do y = nocb+1, noca                  ! - fa(O,O) . z_CO  [f3 probe]
+          w = w - f3(y,x)*zb(i,y)
+        end do
+        do j = 1, nocb                        ! + fa(C,C) . z_CO  [f3 probe]
+          w = w + f3(j,i)*zb(j,x)
+        end do
+        do b = noca+1, nbf                    ! + fb(V,O).z_CV_alpha + fb(V,C).z_OV [fc3]
+          w = w + fc3(b,x)*za(i,b) + fc3(b,i)*za(x,b)
+        end do
+        ij = ij+1
+        pmo(ij) = (e_b(x)-e_b(i))*z(ij) + hs*w
+      end do
+    end do
+
+  ! Block 4 - CV_beta (i in C, a in V): beta part of RO doc-virt.
+    do a = noca+1, nbf
+      do i = 1, nocb
+        w = hpzb(i, a-nocb)
+        do y = nocb+1, noca                  ! - fa(O,C) . z_OV  (-> couples to OV_alpha) [fc4]
+          w = w - fc4(y,i)*za(y,a)
+        end do
+        ij = ij+1
+        pmo(ij) = (e_b(a)-e_b(i))*z(ij) + hs*w
+      end do
+    end do
+
+    deallocate(za, zb)
+
+  end subroutine umrsf_sfrolhs
+
+!> @brief UMRSF relaxed difference density P = T + Z (MO basis), spin-resolved.
+!> @details Generalizes RO sfropcal (tdhf_sf_lib): RO's single CV parameter relaxes
+!>          both spins; here CV is split, CV_alpha -> pa, CV_beta -> pb. The Z part is
+!>          placed in the occ-virt blocks with the RO 0.5 factor; block order matches
+!>          umrsf_sfrogen/umrsfqrorhs (OV_a, CV_a, CO_b, CV_b).
+!>          pa = Ta (over C u O) + Z_alpha ; pb = Tb (over O u V) + Z_beta.
+!>  Соответствует §11 (eq:Pdef) umrsf_gradient_theory.tex.
+!> @param[out] pa,pb relaxed difference density alpha/beta (nbf x nbf, MO)
+!> @param[in]  ta    Ta over C u O   (nocca x nocca)
+!> @param[in]  tb    Tb over O u V   (nvirb x nvirb)
+!> @param[in]  z     solved Z-vector, packed 4-block
+  subroutine umrsf_sfropcal(pa, pb, ta, tb, z, noca, nocb)
+
+    use precision, only: dp
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: pa, pb
+    real(kind=dp), intent(in),  dimension(:,:) :: ta, tb
+    real(kind=dp), intent(in),  dimension(:)   :: z
+    integer, intent(in) :: noca, nocb
+
+    integer :: nbf, i, j, x, a, ij
+
+    nbf = ubound(pa, 1)
+
+  ! Unrelaxed difference density T
+    pa = 0.0_dp
+    do j = 1, noca
+      do i = 1, noca
+        pa(i,j) = ta(i,j)               ! Ta over C u O = [1,noca]
+      end do
+    end do
+    pb = 0.0_dp
+    do j = nocb+1, nbf
+      do i = nocb+1, nbf
+        pb(i,j) = tb(i-nocb,j-nocb)     ! Tb over O u V = [nocb+1,nbf]
+      end do
+    end do
+
+  ! add Z (block order OV_a, CV_a, CO_b, CV_b)
+    ij = 0
+    do a = noca+1, nbf                  ! OV_alpha -> pa(O,V)
+      do x = nocb+1, noca
+        ij = ij+1
+        pa(x,a) = pa(x,a) + z(ij)*0.5_dp
+      end do
+    end do
+    do a = noca+1, nbf                  ! CV_alpha -> pa(C,V)
+      do i = 1, nocb
+        ij = ij+1
+        pa(i,a) = pa(i,a) + z(ij)*0.5_dp
+      end do
+    end do
+    do x = nocb+1, noca                 ! CO_beta -> pb(C,O)
+      do i = 1, nocb
+        ij = ij+1
+        pb(i,x) = pb(i,x) + z(ij)*0.5_dp
+      end do
+    end do
+    do a = noca+1, nbf                  ! CV_beta -> pb(C,V)
+      do i = 1, nocb
+        ij = ij+1
+        pb(i,a) = pb(i,a) + z(ij)*0.5_dp
+      end do
+    end do
+
+  end subroutine umrsf_sfropcal
+
+!> @brief UMRSF relaxation Lagrange matrix W, spin-resolved (W_alpha and W_beta).
+!> @details Generalizes RO mrsfrowcal: RO returns one spin-summed W (valid only for
+!>          C^alpha=C^beta); the AO Pulay term -S^xi.W needs W^alpha from C^alpha and
+!>          W^beta from C^beta separately, so we build them apart. Each RO term is
+!>          partitioned to one spin by the section10 W-boxes: density-labelled terms
+!>          (xhxa/ppija -> alpha, xhxb/ppijb -> beta) partition cleanly; the Fock.Z and
+!>          orbital-energy.Z couplings are placed per the section10 spin assignment.
+!>          xhxa/xhxb = H[X,X] + Fock.T (= Q without the masked H+[T]); ppija/ppijb =
+!>          H+[P] occ-occ. Fold invariant at alpha=beta: W^alpha+W^beta == RO mrsfrowcal
+!>          on the density-partitionable (diagonal) blocks (off-diagonal coupling
+!>          partition is the Phase-6-deferred residual).
+!>  Соответствует §10 (W-блоки) umrsf_gradient_theory.tex.
+  subroutine umrsf_sfrowcal(wa, wb, e_a, e_b, fa, fb, z, xhxa, xhxb, ppija, ppijb, &
+                            hppmoa, hppmob, noca, nocb)
+
+    use precision, only: dp
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: wa, wb
+    real(kind=dp), intent(in),  dimension(:)   :: e_a, e_b
+    real(kind=dp), intent(in),  dimension(:,:) :: fa, fb
+    real(kind=dp), intent(in),  dimension(:)   :: z
+    real(kind=dp), intent(in),  dimension(:,:) :: xhxa, xhxb
+    real(kind=dp), intent(in),  dimension(:,:) :: ppija, ppijb
+    real(kind=dp), intent(in),  dimension(:,:) :: hppmoa, hppmob  ! full MO H+[P]: occ-virt
+    integer, intent(in) :: noca, nocb
+
+  ! hs=0.5: SAME (delta-F)Z generalized-Fock factor as the J operator (eq 37); hs=1.0 FALSIFIED
+  ! by array (worse st1/2). The coupling shares the J's normalization, not Fbar-averaging.
+    real(kind=dp), parameter :: hs = 0.5_dp
+    real(kind=dp), allocatable :: za(:,:), zb(:,:)
+    integer :: nbf, i, j, k, x, y, a, b
+    real(kind=dp) :: w
+
+    nbf = ubound(fa, 1)
+    allocate(za(nbf,nbf), zb(nbf,nbf), source=0.0_dp)
+    call umrsf_sfrogen(za, zb, z, noca, nocb)
+    wa = 0.0_dp; wb = 0.0_dp
+
+  ! ---- W_ix (C,O) ----  alpha: trivial-spin density part; beta: CO-active
+    do x = nocb+1, noca
+      do i = 1, nocb
+        w = 0.0_dp
+        do k = 1, nocb;        w = w - merge(fb(k,i),fa(k,i),umrsf_dbg_wswap==3)*zb(k,x); end do   ! -fa(C,C).z_CO
+        do a = noca+1, nbf;    w = w + merge(fb(a,i),fa(a,i),umrsf_dbg_wswap==3)*za(x,a); end do   ! +fa(C,V).z_OV
+        wa(i,x) = xhxa(i,x) + ppija(i,x)
+        wb(i,x) = xhxb(i,x) + hs*w + e_b(i)*zb(i,x)
+      end do
+    end do
+
+  ! ---- W_ia (C,V) ----  alpha: CV_a diagonal; beta: CV-active + z_OV coupling
+    do a = noca+1, nbf
+      do i = 1, nocb
+        w = 0.0_dp
+        do x = nocb+1, noca;   w = w + merge(fb(x,i),fa(x,i),umrsf_dbg_wswap==4)*za(x,a); end do   ! +fa(O,C).z_OV
+        wa(i,a) = e_a(i)*za(i,a)                                  ! occ-virt H+[P] FALSIFIED (worse
+        wb(i,a) = xhxb(i,a) + hs*w + e_b(i)*zb(i,a)               ! H1_y, inconsist) -> RO-gauge kept
+      end do
+    end do
+
+  ! ---- W_xa (O,V) ----  alpha: fa.z_CV part + OV diagonal; beta: fb.z_OV + xhxb
+    do a = noca+1, nbf
+      do x = nocb+1, noca
+        w = 0.0_dp
+        do k = 1, nocb;        w = w + fa(k,x)*za(k,a); end do   ! +fa(C,O).z_CV_alpha
+        wa(x,a) = e_a(x)*za(x,a) + hs*w                          ! occ-virt H+[P] reverted
+        w = 0.0_dp
+        do y = nocb+1, noca                                      ! -fb(O,O).z_OV [wswap probe]
+          select case (umrsf_dbg_wswap)
+            case (1);     w = w - fa(y,x)*za(y,a)
+            case (2);     w = w - 0.5_dp*(fa(y,x)+fb(y,x))*za(y,a)
+            case default; w = w - fb(y,x)*za(y,a)
+          end select
+        end do
+        wb(x,a) = xhxb(x,a) + hs*w
+      end do
+    end do
+
+  ! ---- diagonal blocks (density-only; partition cleanly) ----
+  ! W_ij (C,C), i>=j : RO hppija+hppijb+xhxa(j,i)
+    do i = 1, nocb
+      do j = 1, i
+        wa(i,j) = ppija(i,j) + xhxa(j,i)
+        wb(i,j) = ppijb(i,j)
+      end do
+    end do
+  ! W_xy (O,O), x>=y : RO xhxa(y,x)+xhxb(y,x)+hppija(x,y)
+    do x = nocb+1, noca
+      do y = nocb+1, x
+        wa(x,y) = xhxa(y,x) + ppija(x,y)
+        wb(x,y) = xhxb(y,x)
+      end do
+    end do
+  ! W_ab (V,V), a>=b : RO xhxb(b,a)
+    do a = noca+1, nbf
+      do b = noca+1, a
+        wb(a,b) = xhxb(b,a)
+      end do
+    end do
+
+  ! scale true diagonal by 0.5, then negate (RO convention)
+    do i = 1, nbf
+      wa(i,i) = wa(i,i)*0.5_dp
+      wb(i,i) = wb(i,i)*0.5_dp
+    end do
+    wa = -wa
+    wb = -wb
+
+    deallocate(za, zb)
+
+  end subroutine umrsf_sfrowcal
 
   subroutine get_mrsf_transition_density(infos, trden, bvec_mo, ist, jst)
 

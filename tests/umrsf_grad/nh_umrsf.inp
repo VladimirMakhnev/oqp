@@ -1,0 +1,28 @@
+[input]
+system=
+ N   0.0000000000   0.0000000000   0.0000000000
+ H   0.0000000000   0.0000000000   1.0362000000
+charge=0
+method=tdhf
+runtype=energy
+functional=bhhlyp
+basis=6-31g*
+[guess]
+type=hcore
+save_mol=false
+[scf]
+type=uhf
+multiplicity=3
+converger_type=diis
+maxit=200
+conv=1.0e-9
+[dftgrid]
+rad_npts=96
+ang_npts=302
+[tdhf]
+type=umrsf
+nstate=5
+multiplicity=1
+target=1
+conv=1.0e-9
+zvconv=1.0e-10

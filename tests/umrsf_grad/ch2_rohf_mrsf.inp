@@ -1,0 +1,34 @@
+# STEP 0: genuine alpha!=beta UMRSF energy. Triplet CH2 (methylene), UHF M_S=+1
+# reference, BHHLYP/6-31G(d). Bent triplet (C-H ~1.08 A, angle ~133 deg).
+[input]
+system=
+ C   0.0000000000   0.0000000000   0.0000000000
+ H   0.0000000000   0.9890000000   0.4320000000
+ H   0.0000000000  -0.9890000000   0.4320000000
+charge=0
+method=tdhf
+runtype=energy
+functional=bhhlyp
+basis=6-31g*
+
+[guess]
+type=huckel
+save_mol=false
+
+[scf]
+type=rohf
+multiplicity=3
+converger_type=diis
+maxit=200
+conv=1.0e-9
+
+[dftgrid]
+rad_npts=96
+ang_npts=302
+
+[tdhf]
+type=mrsf
+nstate=5
+multiplicity=1
+conv=1.0e-9
+zvconv=1.0e-10

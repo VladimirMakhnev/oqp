@@ -18,3 +18,13 @@ include/*
 lib64/*
 share/*
 examples/data_*
+
+# UMRSF-gradient work: build dir, scratch, agent state
+build/
+.claude/
+*.molden
+*.npy
+tests/umrsf_grad/_*
+tests/umrsf_grad/fd_[0mp].*
+tests/umrsf_grad/*.log
+umrsf_theory.txt

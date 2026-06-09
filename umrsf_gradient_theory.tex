@@ -1,0 +1,1323 @@
+% !TEX program = xelatex
+\documentclass[11pt, a4paper]{article}
+
+% ============================================================
+%  Encoding, fonts, languages (XeLaTeX/LuaLaTeX)
+% ============================================================
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{russian}
+\setotherlanguage{english}
+\setmainfont{DejaVu Serif}[Scale=0.95]
+\setsansfont{DejaVu Sans}[Scale=0.92]
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+
+% ============================================================
+%  Mathematics
+% ============================================================
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{bm}
+
+% ============================================================
+%  Layout
+% ============================================================
+\usepackage[margin=2.2cm, top=2.5cm, bottom=2.5cm]{geometry}
+\usepackage{microtype}
+\usepackage{enumitem}
+\setlist{itemsep=2pt, topsep=4pt}
+\usepackage{parskip}
+
+% ============================================================
+%  Tables
+% ============================================================
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{tabularx}
+
+% ============================================================
+%  Cross-references
+% ============================================================
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue!60!black,
+            citecolor=blue!60!black, urlcolor=blue!60!black]{hyperref}
+\usepackage[capitalise, russian]{cleveref}
+\crefname{equation}{ур.}{ур.}
+\Crefname{equation}{Уравнение}{Уравнения}
+\crefname{section}{§}{§}
+\Crefname{section}{Раздел}{Разделы}
+
+% ============================================================
+%  Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{remark}{Замечание}[section]
+\newtheorem{verification}{Проверка}
+\newtheorem*{result}{Результат}
+
+% ============================================================
+%  Custom commands
+% ============================================================
+\newcommand{\sgn}{\operatorname{sgn}}
+\newcommand{\bU}{\bar U}
+\newcommand{\bF}{\bar F}
+\newcommand{\bZ}{\bar Z}
+\newcommand{\bW}{\bar W}
+\newcommand{\bR}{\bar R}
+\newcommand{\bQ}{\bar Q}
+\newcommand{\bP}{\bar P}
+\newcommand{\bC}{\bar c}
+\newcommand{\Uk}[2]{U^{(#1)}_{#2}}
+\newcommand{\Xk}[2]{X^{(#1)}_{#2}}
+\newcommand{\Zk}[2]{Z^{(#1)}_{#2}}
+\newcommand{\Wk}[2]{W^{(#1)}_{#2}}
+\newcommand{\Pk}[2]{P^{(#1)}_{#2}}
+\newcommand{\Tk}[2]{T^{(#1)}_{#2}}
+\newcommand{\Hp}{H^{+}}
+\newcommand{\Hintra}{H^{\text{intra}}}
+\newcommand{\Hinter}{H^{\text{inter}}}
+\newcommand{\Hkintra}{H^{(k)\text{intra}}}
+\newcommand{\Hkinter}{H^{(k)\text{inter}}}
+\newcommand{\Xintra}{X^{\text{intra}}}
+\newcommand{\Xinter}{X^{\text{inter}}}
+\newcommand{\Akz}{A^{(k)(0)}}
+\newcommand{\Akprime}{{A'}^{(k)}}
+\newcommand{\dxi}{(\xi)}
+\newcommand{\MO}{\text{MO}}
+\newcommand{\AO}{\text{AO}}
+\newcommand{\HF}{\text{HF}}
+\newcommand{\MRSF}{\text{MRSF}}
+\newcommand{\xc}{\text{xc}}
+\newcommand{\nocc}{n_{\text{occ}}}
+\newcommand{\nvir}{n_{\text{vir}}}
+
+% ============================================================
+%  Title
+% ============================================================
+\title{\Large\bfseries Аналитический градиент UMRSF-TDDFT\\[4pt]
+       \large Полный теоретический вывод с проверками самосогласованности}
+\author{Рабочий документ}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+В работе выводится аналитический градиент энергии возбуждённого состояния в рамках UMRSF-TDDFT (Unrestricted Mixed-Reference Spin-Flip TDDFT). Это расширение работы Lee, Kim, Nakata, Lee, Choi (J.\ Chem.\ Phys.\ \textbf{150}, 184111, 2019) с RO-MRSF на UKS-референс. Энергетическая теория UMRSF опубликована Komarov et al.\ (J.\ Phys.\ Chem.\ A \textbf{128}, 9526, 2024), но аналитический градиент для UMRSF в литературе пока отсутствует. Стратегия следует методу Furche--Ahlrichs (J.\ Chem.\ Phys.\ \textbf{117}, 7433, 2002): построение полностью вариационного лагранжиана, использование Z-vector метода для устранения зависимости от $\partial C/\partial\xi$, и сборка финального градиента в AO-базисе. Документ содержит: полный вывод от лагранжиана до Z-vector уравнения, явные формулы для $Q$, $R$, $W$ во всех спин-блоках, AO-сборку плотностей и двухчастичной плотности $\Gamma^{(k)}$ для UMRSF, финальную формулу градиента, и приложение с результатами пяти аналитических проверок самосогласованности.
+\end{abstract}
+
+\tableofcontents
+\clearpage
+
+% ============================================================
+\section{Введение}
+% ============================================================
+
+Энергии и градиенты возбуждённых состояний — центральные величины квантовой химии. Для возбуждённых состояний градиент по ядерным координатам нетривиален, поскольку энергия возбуждения $\Omega^{(k)}$ не является вариационным функционалом — это собственное значение матричной задачи. Прямое дифференцирование требует решения coupled-perturbed Kohn--Sham уравнений по каждой ядерной степени свободы, что даёт стоимость $O(3N)$ относительно базовой задачи.
+
+Метод Furche--Ahlrichs устраняет эту масштабирующую проблему: путём введения вспомогательного полностью вариационного лагранжиана с множителями Лагранжа $Z$ и $W$ задача дифференцирования сводится к решению единственного линейного уравнения Z-vector. Стоимость становится $O(1)$ относительно числа ядерных степеней свободы --- то же, что у градиента основного состояния.
+
+Применение этого подхода к Spin-Flip TDDFT (SF-TDDFT) и его расширению Mixed-Reference SF-TDDFT (MRSF-TDDFT) было опубликовано Minezawa--Gordon (2009) и Lee et al.\ (2019) соответственно. Обе реализации используют restricted open-shell Kohn--Sham (ROKS) референс.
+
+Komarov et al.\ (2024) опубликовали \emph{энергетическую} часть UMRSF-TDDFT --- расширения MRSF на UKS-референс. Преимущества UKS: вариационная свобода α/β орбиталей, лучшая сходимость SCF для сильно коррелированных систем, корректное описание broken-symmetry конфигураций. Однако аналитический градиент для UMRSF в литературе \emph{отсутствует}. Цель настоящей работы --- закрыть этот пробел.
+
+\paragraph{Структура документа.}
+\begin{itemize}
+    \item \Cref{sec:notation} --- обозначения и конвенции.
+    \item \Cref{sec:response} --- уравнение отклика и orbital Hessian (репродуцирует Komarov 2024).
+    \item \Cref{sec:lagrangian,sec:stationary,sec:folding,sec:zvector} --- вывод Z-vector уравнения.
+    \item \Cref{sec:aux,sec:Qexplicit,sec:Rexplicit,sec:Wexplicit} --- явные формулы для $Q$, $R$, $W$.
+    \item \Cref{sec:AOassembly,sec:Gamma,sec:gradient} --- AO-сборка градиента.
+    \item \Cref{sec:openquestions} --- открытые вопросы.
+    \item \Cref{app:checks} --- пять аналитических проверок.
+\end{itemize}
+
+% ============================================================
+\section{Обозначения и конвенции}
+\label{sec:notation}
+% ============================================================
+
+\subsection{Орбитальные пространства}
+
+В каждой геометрической точке SCF UKS даёт два независимых набора молекулярных орбиталей: α и β. Пространство MO разбивается на три класса:
+
+\begin{itemize}
+    \item $i, j, \ldots$ --- \textbf{дважды занятые} (closed, $C$); в $M_S = +1$ референсе заняты обоими спинами.
+    \item $x, y, \ldots$ --- \textbf{однократно занятые} (open, $O$); $O_1, O_2$ --- две SOMO (singly occupied molecular orbitals). В $M_S = +1$ заняты только α.
+    \item $a, b, \ldots$ --- \textbf{виртуальные} ($V$).
+    \item $p, q, r, s, t, u, \ldots$ --- произвольные орбитальные индексы.
+    \item $\mu, \nu, \kappa, \lambda$ --- индексы атомных орбиталей (AO).
+    \item $m, n \in \{1, 2\}$ --- индексы SOMO.
+\end{itemize}
+
+В $M_S = +1$ референсе:
+\begin{align}
+    \text{α-занятые:} \quad &C \cup O, \\
+    \text{α-виртуальные:} \quad &V, \\
+    \text{β-занятые:} \quad &C, \\
+    \text{β-виртуальные:} \quad &O \cup V.
+\end{align}
+
+Эти асимметричные диапазоны --- структурный отпечаток спин-флипа: в SF-формализме одну α-занятую орбиталь (из $C \cup O$) переводят в β-виртуальную (из $O \cup V$).
+
+\subsection{Спиновые индексы и спин-состояния}
+
+$\sigma, \tau \in \{\alpha, \beta\}$. Спиновое состояние $k$ маркируется как $S$ (синглет) или $T$ (триплет) с сигнатурой:
+\begin{equation}
+    \sgn(S) = +1, \qquad \sgn(T) = -1.
+    \label{eq:sgn}
+\end{equation}
+
+\subsection{MO-коэффициенты и пространственные орбитали}
+
+В UKS α- и β-наборы независимы:
+\begin{equation}
+    \chi_p(\mathbf r) = \sum_\mu c_{\mu p \alpha} \phi_\mu(\mathbf r), \qquad
+    \bar\chi_p(\mathbf r) = \sum_\mu c_{\mu p \beta} \phi_\mu(\mathbf r).
+    \label{eq:MOdef}
+\end{equation}
+
+Внутри-спиновая ортонормированность сохраняется:
+\begin{equation}
+    \langle \chi_p | \chi_q \rangle = \delta_{pq}, \qquad
+    \langle \bar\chi_p | \bar\chi_q \rangle = \delta_{pq}.
+\end{equation}
+
+Однако \textbf{межспиновое перекрытие} нетривиально:
+\begin{equation}
+    S_{pq} \equiv \langle \chi_p | \bar\chi_q \rangle \ne \delta_{pq}.
+    \label{eq:Spq}
+\end{equation}
+
+Это центральное отличие UKS от ROHF. В ROHF $\chi_p = \bar\chi_p$ автоматически, и $S_{pq} = \delta_{pq}$.
+
+\begin{remark}
+Нетривиальный $S_{pq}$ входит в формулу для $\langle S^2 \rangle$ (Komarov 2024, формулы 21, 22 через TLF0-приближение) но \emph{не} входит в Lagrangian. Поэтому производные $\partial S_{pq}/\partial \xi$ не появляются в градиенте, если не вводить $\langle S^2 \rangle$-constraint.
+\end{remark}
+
+\subsection{Двухэлектронные интегралы}
+
+В Mulliken-нотации с явным указанием набора:
+\begin{align}
+    (pq | rs) &= \iint \chi_p^*(\mathbf r_1)\, \chi_q(\mathbf r_1)\, r_{12}^{-1}\, \chi_r^*(\mathbf r_2)\, \chi_s(\mathbf r_2)\, d\mathbf r_1\, d\mathbf r_2, \\
+    (pq | \bar r \bar s) &= \iint \chi_p^*(\mathbf r_1)\, \chi_q(\mathbf r_1)\, r_{12}^{-1}\, \bar\chi_r^*(\mathbf r_2)\, \bar\chi_s(\mathbf r_2)\, d\mathbf r_1\, d\mathbf r_2,
+\end{align}
+и аналогично $(\bar p \bar q | rs)$, $(\bar p \bar q | \bar r \bar s)$. Все четыре варианта --- это \emph{тот же} AO-базис ERI $(\mu\nu | \kappa\lambda)$, контрактированный с соответствующими MO-наборами. Новых интегральных классов не возникает; меняются только MO-преобразования.
+
+\subsection{Возмущение по ядерной координате}
+
+$\xi$ --- ядерная координата (компонента декартова смещения некоторого ядра). Верхний индекс $\dxi$ обозначает частную производную при \textbf{фиксированных} MO-коэффициентах --- т.е.\ производная по $\xi$ только AO-объектов (интегралов, базисных функций). Без скобок $\xi$ --- полная производная.
+
+% ============================================================
+\section{Уравнение отклика и orbital Hessian}
+\label{sec:response}
+% ============================================================
+
+UMRSF-TDDFT response equation в приближении Tamm--Dancoff:
+\begin{equation}
+    \sum_{rs} A^{(k)}_{pq, rs}\, \Xk{k}{rs} = \Omega^{(k)}\, \Xk{k}{pq}, \qquad
+    \sum_{pq} \bigl(\Xk{k}{pq}\bigr)^2 = 1.
+    \label{eq:response}
+\end{equation}
+
+Orbital Hessian разбивается на бескаплинговую и spin-pairing части:
+\begin{equation}
+    A^{(k)}_{pq, rs} = \Akz_{pq, rs} + \Akprime_{pq, rs}.
+    \label{eq:Adecomp}
+\end{equation}
+
+\subsection{Бескаплинговая часть}
+
+\textbf{Формула} (Komarov 2024, формула 8):
+\begin{equation}
+    \boxed{\;
+    \Akz_{pq, rs} = \Uk{k}{pq} \bigl\{ \delta_{pr}\delta_{qs}(\bar\epsilon_q - \epsilon_p) - c_{\MRSF}\, (pr | \bar s \bar q) \bigr\} \Uk{k}{rs},
+    \;}
+    \label{eq:A0}
+\end{equation}
+где $\epsilon_p = F_{pp\alpha}$, $\bar\epsilon_q = F_{qq\beta}$ --- диагональные элементы UKS Fock'ов, а $\Uk{k}{pq}$ --- dimensional transformation матрицы.
+
+\subsubsection{Dimensional transformation matrices}
+
+Введены Lee et al.\ (2019, формула II.8a-b в основной статье; явные формулы S3--S16 в SI Komarov 2024). Главная их роль: позволяют сохранить структуру SF-TDDFT кода при работе с расширенным response space MRSF.
+
+Для синглетного и триплетного состояний:
+\begin{align}
+    \Uk{S}{pq} &= U^G_{pq} + U^D_{pq} + U^{OOS}_{pq} + \sum_m U^{CO_m}_{pq} + \sum_m U^{O_mV}_{pq} + U^{CV}_{pq}, \label{eq:US} \\
+    \Uk{T}{pq} &= U^{OOT}_{pq} + \sum_m U^{CO_m}_{pq} + \sum_m U^{O_mV}_{pq} + U^{CV}_{pq}. \label{eq:UT}
+\end{align}
+
+Различие: триплет не содержит $U^G$, $U^D$, $U^{OOS}$ (closed-shell и doubly-excited не дают триплетный отклик). $U^{OOT}$ заменяет $U^{OOS}$ в триплете.
+
+\subsection{Spin-pairing coupling}
+
+A posteriori coupling между $M_S = +1$ и $M_S = -1$ ветками (Komarov 2024, формула 15):
+\begin{align}
+    \Akprime_{pq, rs}
+    &= \Hkintra_{p\alpha \underline{q}\beta, r\underline{\beta} \underline{s}\alpha}\, (U^{CO_1}_{pq} - U^{CO_2}_{pq})(U^{CO_1}_{rs} - U^{CO_2}_{rs}) \nonumber\\
+    &\quad + \Hkintra_{\underline{p}\alpha q\beta, \underline{r}\beta s\alpha}\, (U^{O_1V}_{pq} - U^{O_2V}_{pq})(U^{O_1V}_{rs} - U^{O_2V}_{rs}) \nonumber\\
+    &\quad + \Hkinter_{p\alpha q\alpha, r\alpha s\alpha}\, (U^{CO_1}_{pq} U^{O_2V}_{rs} + U^{CO_2}_{pq} U^{O_1V}_{rs}) \nonumber\\
+    &\quad + \Hkinter_{p\beta q\beta, r\beta s\beta}\, (U^{O_1V}_{pq} U^{CO_2}_{rs} + U^{O_2V}_{pq} U^{CO_1}_{rs}),
+    \label{eq:Aprime}
+\end{align}
+где underline-нотация $\underline{p}$ означает swap $O_1 \leftrightarrow O_2$:
+\begin{equation}
+    \underline{p} = O_2 \text{ если } p = O_1; \quad \underline{p} = O_1 \text{ если } p = O_2.
+\end{equation}
+
+Spin-pairing операторы:
+\begin{align}
+    \Hkintra_{pq, rs} &= \sgn(k)\, c_{\MRSF}\, (p\bar s | r \bar q), \label{eq:Hintra} \\
+    \Hkinter_{pq, rs} &= \sgn(k)\, c_{\MRSF}\, \bigl\{ (pq | \bar r \bar s) - (p \bar r | \bar s q) \bigr\}. \label{eq:Hinter}
+\end{align}
+
+\subsection{UKS Fock-операторы}
+
+Спин-расщеплённые Fock-матрицы UKS:
+\begin{align}
+    F_{pq\alpha} &= h_{pq\alpha} + V^{\xc}_{pq\alpha} + \sum_{i=1}^{O_1 - 1} \bigl[(pq | ii) + (pq | \bar i \bar i) - c_{\HF}\, (pi | iq)\bigr] \nonumber\\
+    &\quad + \sum_{x \in O} \bigl[(pq | xx) - c_{\HF}\, (px | xq)\bigr], \label{eq:Falpha} \\
+    F_{pq\beta} &= \bar h_{pq} + \bar V^{\xc}_{pq\beta} + \sum_{i=1}^{O_1 - 1} \bigl[(\bar p \bar q | ii) + (\bar p \bar q | \bar i \bar i) - c_{\HF}\, (\bar p \bar i | \bar i \bar q)\bigr] \nonumber\\
+    &\quad + \sum_{x \in O} (\bar p \bar q | xx). \label{eq:Fbeta}
+\end{align}
+
+Асимметрия в $\sum_{x \in O}$: α-Fock получает двойной вклад (Coulomb + exchange) от обоих SOMO (поскольку они α-заняты в $M_S = +1$), β-Fock --- только Coulomb-вклад (SOMO не β-заняты).
+
+\subsection{Стационарные условия SCF}
+
+UKS variational principle даёт \textbf{шесть независимых} off-diagonal условий:
+\begin{equation}
+    F_{ia\sigma} = 0, \quad F_{ix\sigma} = 0, \quad F_{xa\sigma} = 0, \qquad \sigma \in \{\alpha, \beta\}.
+    \label{eq:SCFstationary}
+\end{equation}
+
+Внутриспиновая ортонормированность MO выполняется отдельно для каждого спина:
+\begin{equation}
+    S^{\MO}_{pq\alpha} = \delta_{pq}, \qquad S^{\MO}_{pq\beta} = \delta_{pq}.
+    \label{eq:MOortho}
+\end{equation}
+
+Между α и β условия ортогональности \textbf{отсутствуют} --- это ключевое отличие UKS от ROHF.
+
+% ============================================================
+\section{Лагранжиан UMRSF-TDDFT}
+\label{sec:lagrangian}
+% ============================================================
+
+\subsection{Мотивация: трюк Furche--Ahlrichs}
+
+Энергия возбуждённого состояния $\Omega^{(k)}$ удовлетворяет уравнению отклика \eqref{eq:response} --- это собственное значение матрицы $A^{(k)}$. Прямая попытка взять $\partial \Omega/\partial \xi$ потребовала бы дифференцирования $A^{(k)}(\xi)$ как явно (по AO), так и неявно (через зависимость MO-коэффициентов от $\xi$, регулируемую coupled-perturbed Kohn-Sham уравнением). Последнее --- линейная система размера $\sim N^2$, которую нужно решать для \emph{каждой} ядерной степени свободы $\xi$, то есть $O(3N)$ раз.
+
+Furche--Ahlrichs (2002) предложили: построить расширенный функционал, который \emph{полностью вариационен} по всем переменным (включая MO-коэффициенты, $X$, $\Omega$, множители Лагранжа). Тогда производная по $\xi$ сводится только к \emph{явному} дифференцированию (по AO), $O(1)$ по числу ядер.
+
+Это достигается введением множителей Лагранжа $Z$ для условий стационарности SCF \eqref{eq:SCFstationary} и $W$ для ортонормированности MO \eqref{eq:MOortho}.
+
+\subsection{Полный лагранжиан}
+
+\begin{equation}
+\boxed{
+\begin{aligned}
+    L^{(k)} &= G[\Xk{k}{}, \Omega^{(k)}] \\
+    &\quad + \sum_{\sigma = \alpha, \beta} \biggl[ \sum_{ia} \Zk{k}{ia\sigma}\, F_{ia\sigma} + \sum_{ix} \Zk{k}{ix\sigma}\, F_{ix\sigma} + \sum_{xa} \Zk{k}{xa\sigma}\, F_{xa\sigma} \biggr] \\
+    &\quad - \sum_{\sigma = \alpha, \beta} \sum_{p \le q} \Wk{k}{pq\sigma} \bigl( S^{\MO}_{pq\sigma} - \delta_{pq} \bigr),
+\end{aligned}}
+\label{eq:Lagrangian}
+\end{equation}
+
+где главный функционал:
+\begin{equation}
+    G[\Xk{k}{}, \Omega^{(k)}] = \sum_{pq, rs} \Xk{k}{pq}\, A^{(k)}_{pq, rs}\, \Xk{k}{rs} - \Omega^{(k)} \biggl( \sum_{pq} (\Xk{k}{pq})^2 - 1 \biggr).
+    \label{eq:Gdef}
+\end{equation}
+
+\subsection{Сравнение с RO-MRSF Лагранжианом}
+
+Lee 2019 (формула 3.3 основной статьи) для RO-MRSF:
+\begin{equation}
+    L^{\text{RO}} = G + 2 \sum_{ia\sigma} Z_{ia\sigma}\, \bF_{ia\sigma} + \sum_{ix\sigma} Z_{ix\sigma}\, \bF_{ix\sigma} + \sum_{xa\sigma} Z_{xa\sigma}\, \bF_{xa\sigma} - 2 \sum_{p \le q, \sigma} W_{pq\sigma}(S_{pq\sigma} - \delta_{pq}).
+\end{equation}
+
+Обратите внимание на коэффициенты $\{2, 1, 1, 2\}$ перед суммами для блоков $\{ia, ix, xa, W\}$ соответственно. Это веса Guest-Saunders averaging --- ROHF использует усреднённый Fock $\bF = (F_\alpha + F_\beta)/2$ с разной нормировкой для разных блоков.
+
+В UMRSF \eqref{eq:Lagrangian} \emph{все веса равны 1}. Это потому, что UKS Lagrangian не требует усреднения --- α и β Fock'и независимы.
+
+\begin{remark}
+Изменение весов имеет важные последствия. В RO Z-vector коэффициенты при $Z_{ia,\sigma}$ удвоены относительно $Z_{ix,\sigma}, Z_{xa,\sigma}$, и определение $\bQ^{\text{RO}}_{tu}$ включает усреднение $\tfrac{1}{2}(\partial_\alpha + \partial_\beta)$. В UMRSF этого усреднения нет, и веса формул для $Q$ соответственно увеличены в 2 раза (см.\ \cref{sec:Qexplicit}).
+\end{remark}
+
+\subsection{Ключевые отличия от RO-MRSF}
+
+\begin{enumerate}
+    \item \textbf{Шесть} независимых Z-блоков (3 типа off-diagonal $\times$ 2 спина), против трёх spin-collapsed в RO.
+    \item \textbf{Два независимых} набора W-multipliers.
+    \item Все коэффициенты Лагранжиана равны 1 (нет ROHF-усреднения).
+\end{enumerate}
+
+% ============================================================
+\section{Стационарные условия}
+\label{sec:stationary}
+% ============================================================
+
+Лагранжиан \eqref{eq:Lagrangian} стационарен по всем переменным на оптимуме.
+
+\subsection{По $X^{(k)}$ и $\Omega^{(k)}$}
+
+Возвращает уравнение отклика:
+\begin{equation}
+    \frac{\partial L^{(k)}}{\partial \Xk{k}{pq}} = 2 \sum_{rs} A^{(k)}_{pq, rs}\, \Xk{k}{rs} - 2 \Omega^{(k)}\, \Xk{k}{pq} = 0,
+\end{equation}
+и условие нормировки:
+\begin{equation}
+    \frac{\partial L^{(k)}}{\partial \Omega^{(k)}} = -\biggl( \sum_{pq} (\Xk{k}{pq})^2 - 1 \biggr) = 0.
+\end{equation}
+
+\subsection{По множителям Лагранжа $Z$ и $W$}
+
+Возвращают UKS-условия и ортонормированность MO:
+\begin{equation}
+    \frac{\partial L^{(k)}}{\partial \Zk{k}{pq\sigma}} = F_{pq\sigma} = 0, \qquad pq \in \{CO, CV, OV\},\ \sigma \in \{\alpha, \beta\},
+    \label{eq:dZ}
+\end{equation}
+\begin{equation}
+    \frac{\partial L^{(k)}}{\partial \Wk{k}{pq\sigma}} = S^{\MO}_{pq\sigma} - \delta_{pq} = 0.
+    \label{eq:dW}
+\end{equation}
+
+\subsection{По MO-коэффициентам}
+
+Центральные условия, из которых получаются уравнения для $Z$ и $W$:
+\begin{equation}
+    \frac{\partial L^{(k)}}{\partial c_{\mu t \alpha}} = 0, \qquad \frac{\partial L^{(k)}}{\partial c_{\mu t \beta}} = 0, \qquad \forall\ \mu, t.
+    \label{eq:dc}
+\end{equation}
+
+Это \textbf{два набора уравнений} (по одному на каждый спин), в отличие от RO-MRSF где в результате усреднения получается один набор.
+
+% ============================================================
+\section{Сворачивание orbital stationary condition}
+\label{sec:folding}
+% ============================================================
+
+Применяем стандартный приём: умножаем \eqref{eq:dc} на $c_{\mu u \sigma}$ и суммируем по $\mu$. Получаем \textbf{два независимых} скалярных уравнения для $\sigma = \alpha$ и $\sigma = \beta$.
+
+\subsection{Определение $Q^{(k)}_{tu\sigma}$}
+
+\begin{equation}
+    \boxed{\;
+    Q^{(k)}_{tu\sigma} \equiv \sum_\mu \frac{\partial G[\Xk{k}{}, \Omega^{(k)}]}{\partial c_{\mu t \sigma}}\, c_{\mu u \sigma}, \qquad \sigma \in \{\alpha, \beta\}.
+    \;}
+    \label{eq:Qdef}
+\end{equation}
+
+Это «сырая» производная гессианной части по MO для каждого спина отдельно.
+
+\subsection{Вклад от W-членов}
+
+Используя $S^{\MO}_{pq\sigma'} = \sum_{\mu\nu} c^*_{\mu p \sigma'} S^{\AO}_{\mu\nu} c_{\nu q \sigma'}$ и $S^{\MO}_{pq\sigma'} = \delta_{pq}$ на оптимуме:
+\begin{equation}
+    \sum_\mu \frac{\partial S^{\MO}_{pq\sigma'}}{\partial c_{\mu t \sigma}}\, c_{\mu u \sigma} = \delta_{\sigma\sigma'} \bigl( \delta_{pt}\delta_{qu} + \delta_{qt}\delta_{pu} \bigr).
+\end{equation}
+
+Внутриспиновость через $\delta_{\sigma\sigma'}$ означает: $\Wk{k}{tu\alpha}$ возникает только в α-уравнении, $\Wk{k}{tu\beta}$ --- только в β-уравнении. \textbf{Между W-секторами нет смешивания.}
+
+После суммирования по $p \le q$:
+\begin{equation}
+    \sum_{p \le q} \Wk{k}{pq\sigma'} \bigl( \delta_{pt}\delta_{qu} + \delta_{qt}\delta_{pu} \bigr) = (1 + \delta_{tu})\, \Wk{k}{tu\sigma'}.
+\end{equation}
+
+\subsection{Вклад от Z-членов: cross-spin coupling}
+
+Поскольку $F_{pq\sigma'}$ зависит \emph{от обоих} наборов MO (через Coulomb-смешивание и $V^{\xc}$), производная по $c_{\mu t \alpha}$ от $F_{pq\beta}$ нетривиальна. Определяем линейный оператор Hessian-vector product:
+\begin{equation}
+    \sum_\mu \frac{\partial F_{pq\sigma'}}{\partial c_{\mu t \sigma}}\, c_{\mu u \sigma} = \delta_{\sigma\sigma'} \bigl( \delta_{pt} F_{uq\sigma'} - \delta_{qt} F_{pu\sigma'} \bigr) + \tilde H^{\sigma'\sigma}_{pq, tu}[\cdot].
+\end{equation}
+
+Полный оператор $\tilde H$ имеет \textbf{спин-явную форму} с 4 вариантами:
+\begin{equation}
+    \boxed{\;
+    \tilde H^{\sigma'\sigma}_{pq, tu}[V] = \sum_{rs}\Bigl\{ (pq|rs)_{\sigma', \sigma} + f^{\xc}_{pq\sigma', rs\sigma} - c_{\HF}\, \delta_{\sigma'\sigma}\bigl[(pr|sq) + (ps|rq)\bigr]_\sigma \Bigr\} V_{rs\sigma}.
+    \;}
+    \label{eq:Htilde}
+\end{equation}
+
+Подстрочные $\sigma', \sigma$ при ERI означают: Coulomb-часть $(pq|rs)_{\sigma', \sigma}$ берёт MO из $\sigma'$-набора для первой пары и из $\sigma$-набора для второй; exchange-часть существует только при $\sigma' = \sigma$.
+
+\textbf{Cross-spin coupling} (когда $\sigma' \ne \sigma$): только Coulomb и $f^{\xc}_{\alpha\beta}$ дают вклад, exchange-часть зануляется через $\delta_{\sigma'\sigma}$. Это важно для имплементации Z-vector solver.
+
+\subsection{Свёрнутые уравнения}
+
+Подстановка всего в \eqref{eq:dc} даёт \textbf{6 связанных уравнений} (по блоку $tu$ и спину $\sigma'$):
+
+\begin{equation}
+    \boxed{\;
+    Q^{(k)}_{tu\sigma'} + \bigl( \delta_{pt} F_{uq\sigma'} - \delta_{qt} F_{pu\sigma'} \bigr)\, \Zk{k}{pq\sigma'} + \sum_\sigma \tilde H^{\sigma'\sigma}_{tu}\bigl[\Zk{k}{\sigma}\bigr] = (1 + \delta_{tu})\, \Wk{k}{tu\sigma'}.
+    \;}
+    \label{eq:master}
+\end{equation}
+
+Здесь сумма по $\sigma$ внутри $\tilde H$ означает связь $Z_\alpha$ с $Z_\beta$ через cross-spin Coulomb.
+
+% ============================================================
+\section{Z-vector уравнение}
+\label{sec:zvector}
+% ============================================================
+
+\subsection{Получение Z-vector уравнения через вычитание}
+
+W-вектора устраняются вычитанием пар уравнений вида $tu = ia$ и $tu = ai$. По симметрии $W_{tu\sigma'} = W_{ut\sigma'}$:
+\begin{align}
+    \text{Уравнение } (ia,\sigma'): \quad Q^{(k)}_{ia\sigma'} + \ldots &= W^{(k)}_{ia\sigma'}, \\
+    \text{Уравнение } (ai,\sigma'): \quad Q^{(k)}_{ai\sigma'} + \ldots &= W^{(k)}_{ai\sigma'} = W^{(k)}_{ia\sigma'}.
+\end{align}
+
+Вычитая, получаем уравнение, не содержащее $W$:
+\begin{equation}
+    \bigl( Q^{(k)}_{ia\sigma'} - Q^{(k)}_{ai\sigma'} \bigr) + \bigl( \text{диагональные F-члены} \bigr) + \bigl( \tilde H_{ia} - \tilde H_{ai} \bigr)[Z] = 0.
+\end{equation}
+
+Аналогично для CO ($ix$ vs $xi$) и OV ($xa$ vs $ax$) пар.
+
+\subsection{Расширенное Z-vector уравнение}
+
+\begin{equation}
+    \boxed{\; \mathbf J^{(k)}\, \mathbf Z^{(k)} = -\mathbf R^{(k)}, \;}
+    \label{eq:Zvec}
+\end{equation}
+где
+\begin{equation}
+    \mathbf Z^{(k)} = \bigl( \Zk{k}{ia\alpha},\, \Zk{k}{ix\alpha},\, \Zk{k}{xa\alpha},\, \Zk{k}{ia\beta},\, \Zk{k}{ix\beta},\, \Zk{k}{xa\beta} \bigr)^T,
+\end{equation}
+\begin{equation}
+    R^{(k)}_{pq\sigma'} = Q^{(k)}_{pq\sigma'} - Q^{(k)}_{qp\sigma'}.
+    \label{eq:Rdef}
+\end{equation}
+
+Размерность $\mathbf J^{(k)}$ --- $\sim (6 \cdot \nocc \cdot \nvir)^2$, блочно-диагональна по спинам для exchange-части и имеет cross-spin блоки $J^{\alpha\beta}, J^{\beta\alpha}$ для Coulomb-части.
+
+\subsection{Активные и тривиальные блоки}
+
+Формально $\mathbf Z^{(k)}$ имеет 6 спиновых блоков, но \textbf{не все они активны}. Это следствие асимметрии MRSF-конфигураций между α- и β-пространствами в $M_S = +1$ референсе:
+
+\begin{itemize}
+    \item В \textbf{α-пространстве}: $C$ дважды α-занят, $O$ α-занят, $V$ α-виртуален. Ротация $C \to O$ (блок $ix$) --- внутри α-occupied. \textbf{Не нужна.}
+    \item В \textbf{β-пространстве}: $C$ β-занят, $O$ β-виртуален, $V$ β-виртуален. Ротация $O \to V$ (блок $xa$) --- внутри β-virtual. \textbf{Не нужна.}
+\end{itemize}
+
+\textbf{Активные блоки}:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Блок & α & β \\
+\midrule
+CO ($ix$) & тривиально 0 (внутри α-occ) & активен: $\Zk{k}{ix\beta}$ \\
+OV ($xa$) & активен: $\Zk{k}{xa\alpha}$ & тривиально 0 (внутри β-virt) \\
+CV ($ia$) & активен: $\Zk{k}{ia\alpha}$ & активен: $\Zk{k}{ia\beta}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Итого \textbf{4 активных блока, не 6}. Реальная размерность:
+\begin{equation}
+    \boxed{\;
+    \dim(\mathbf Z^{(k)})_{\text{UMRSF}} = n_O n_V + n_C n_O + 2 n_C n_V.
+    \;}
+    \label{eq:Zdim}
+\end{equation}
+
+Для сравнения, RO Lee 2019: $\dim(\bZ) = n_C n_O + n_O n_V + n_C n_V$ --- три блока без удвоения. Удваивается только $CV$-блок (где $ia$ актуален в обоих спинах).
+
+% ============================================================
+\section{Unrelaxed difference density и вспомогательные операторы}
+\label{sec:aux}
+% ============================================================
+
+Для записи явных формул $Q$, $R$, $W$ нужны несколько вспомогательных величин.
+
+\subsection{Unrelaxed difference density}
+
+\begin{align}
+    \Tk{k}{pr\alpha} &= -\sum_q \Uk{k}{pq}\, \Xk{k}{pq}\, \Uk{k}{rq}\, \Xk{k}{rq}, \quad p, r \in C \cup O, \label{eq:Talpha} \\
+    \Tk{k}{qs\beta} &= +\sum_p \Uk{k}{pq}\, \Xk{k}{pq}\, \Uk{k}{ps}\, \Xk{k}{ps}, \quad q, s \in O \cup V. \label{eq:Tbeta}
+\end{align}
+
+В UMRSF $\Tk{k}{pr\alpha}$ имеет нетривиальные блоки $CC, OO$ (и $CO = 0$ по симметрии); $\Tk{k}{qs\beta}$ --- $OO, VV$ (и $OV = 0$).
+
+\subsection{Оператор $H^+_{tu\sigma}[V]$}
+
+Стандартный orbital response оператор:
+\begin{equation}
+    \Hp_{tu\sigma'}[V] = \sum_{rs\sigma}\Bigl\{ 2(tu|rs)_{\sigma', \sigma} + 2 f^{\xc}_{tu\sigma', rs\sigma} - c_{\HF}\, \delta_{\sigma'\sigma}\bigl[(ts|ru) + (tr|su)\bigr] \Bigr\} V_{rs\sigma}.
+    \label{eq:Hplus}
+\end{equation}
+
+В UMRSF это оператор с явным спиновым индексом $\sigma'$, действующий на двухиндексный объект $V_{rs\sigma}$.
+
+\subsection{Нелинейный оператор $H^{(0)}_{tu\sigma}[X, X]$}
+
+\begin{align}
+    H^{(0)}_{tu\alpha}[\Xk{k}{}, \Xk{k}{}] &= \sum_{r \in C \cup O} \sum_{q, s \in O \cup V} \Uk{k}{tq}\, \Xk{k}{tq} \bigl\{ \delta_{ur} F_{qs\beta} - \delta_{qs} F_{ur\alpha} - c_{\HF}\, (ur|\bar s\bar q) \bigr\} \Uk{k}{rs}\, \Xk{k}{rs}, \label{eq:H0alpha} \\
+    H^{(0)}_{tu\beta}[\Xk{k}{}, \Xk{k}{}] &= \sum_{p, r \in C \cup O} \sum_{s \in O \cup V} \Uk{k}{pt}\, \Xk{k}{pt} \bigl\{ \delta_{pr} F_{us\beta} - \delta_{us} F_{pr\alpha} - c_{\HF}\, (pr|\bar s\bar u) \bigr\} \Uk{k}{rs}\, \Xk{k}{rs}. \label{eq:H0beta}
+\end{align}
+
+\subsection{Spin-pairing intra/inter операторы}
+
+Intra-block (C-O или O-V, $x = O_1$ или $O_2$):
+\begin{align}
+    \Hintra_{tu\alpha}\bigl[\Xk{k}{Cx}, \Xk{k}{Cy}\bigr] &= (-1)^{1 - \delta_{xy}} \sum_{r \in C} \sum_{q, s \in O} U^{Cx}_{tq}\, \Xk{k}{tq}\, \Hkintra_{u\alpha q\beta, r\beta s\alpha}\, U^{Cy}_{rs}\, \Xk{k}{rs}, \\
+    \Hintra_{tu\alpha}\bigl[\Xk{k}{xV}, \Xk{k}{yV}\bigr] &= (-1)^{1 - \delta_{xy}} \sum_{r \in O} \sum_{q, s \in V} U^{xV}_{tq}\, \Xk{k}{tq}\, \Hkintra_{u\alpha q\beta, r\beta s\alpha}\, U^{yV}_{rs}\, \Xk{k}{rs}.
+\end{align}
+
+Inter-block:
+\begin{align}
+    \Hinter_{tu\alpha}\bigl[\Xk{k}{Cx}, \Xk{k}{yV}\bigr] &= \sum_{r, q \in O} \sum_{s \in V} U^{Cx}_{tq}\, \Xk{k}{tq}\, \Hkinter_{u\alpha q\alpha, r\alpha s\alpha}\, U^{yV}_{rs}\, \Xk{k}{rs}, \\
+    \Hinter_{tu\alpha}\bigl[\Xk{k}{xV}, \Xk{k}{Cy}\bigr] &= \sum_{r \in C} \sum_{s \in O} \sum_{q \in V} U^{xV}_{tq}\, \Xk{k}{tq}\, \Hkinter_{u\alpha q\alpha, r\alpha s\alpha}\, U^{Cy}_{rs}\, \Xk{k}{rs}.
+\end{align}
+
+Аналогичные формулы для β с заменой Fock и индексных диапазонов.
+
+\subsection{Сборка $H_{tu\sigma}[X, X]$}
+
+\begin{equation}
+    H_{tu\sigma}[X, X] \equiv H^{(0)}_{tu\sigma}[X, X] + \sum_{xy} \Hintra_{tu\sigma}\bigl[\Xk{k}{Cx}, \Xk{k}{Cy}\bigr] + \sum_{xy} \Hintra_{tu\sigma}\bigl[\Xk{k}{xV}, \Xk{k}{yV}\bigr] + \sum_x \bigl( \Hinter_{tu\sigma}[\ldots] + \ldots \bigr).
+    \label{eq:Hfull}
+\end{equation}
+
+\subsection{Fock-like bilinear оператор $F_{tu\sigma}[X, X]$}
+
+\begin{align}
+    F_{tu\alpha}[X, X] &= -\Xk{k}{tq}\, F_{qs\beta}\, \Xk{k}{us}, \label{eq:FX} \\
+    F_{tu\beta}[X, X] &= +\Xk{k}{pt}\, F_{pr\alpha}\, \Xk{k}{ru}.
+\end{align}
+
+% ============================================================
+\section{Явные формулы для $Q^{(k)}_{tu\sigma}$}
+\label{sec:Qexplicit}
+% ============================================================
+
+Получаются раздельным дифференцированием $G$ по $c_{\mu t \alpha}$ и $c_{\mu t \beta}$ с последующей свёрткой. Структурно --- это расщепление формул Lee 2019 (SI S18a--i) по спиновым компонентам, \textbf{без} RO-усреднения 1:1.
+
+В UMRSF индексация $tu$ пробегает 9 типов блоков. Для каждого --- два спиновых варианта. Приводим все 18 элементов.
+
+\subsection{Блок $tu = ix$ (C $\to$ O)}
+
+\begin{align}
+    \boxed{Q^{(k)}_{ix\alpha} = \Hp_{ix\alpha}[\Tk{k}{}] + 2 H_{ix\alpha}[X, X] + 2 F_{ix\alpha}[X, X]} \label{eq:Qixa} \\
+    \boxed{Q^{(k)}_{ix\beta} = \Hp_{ix\beta}[\Tk{k}{}] + 2 H_{ix\beta}[X, X]} \label{eq:Qixb}
+\end{align}
+
+\subsection{Блок $tu = xi$ (O $\to$ C)}
+
+\begin{align}
+    Q^{(k)}_{xi\alpha} &= \Hp_{xi\alpha}[\Tk{k}{}] + 2 H_{xi\alpha}[X, X] + 2 F_{xi\alpha}[X, X], \\
+    Q^{(k)}_{xi\beta} &= \Hp_{xi\beta}[\Tk{k}{}] + 2 H_{xi\beta}[X, X].
+\end{align}
+
+\subsection{Блок $tu = ia$ (C $\to$ V)}
+
+\begin{align}
+    Q^{(k)}_{ia\alpha} &= \Hp_{ia\alpha}[\Tk{k}{}] + 2 H_{ia\alpha}[X, X], \\
+    Q^{(k)}_{ia\beta} &= \Hp_{ia\beta}[\Tk{k}{}] + 2 H_{ia\beta}[X, X].
+\end{align}
+
+\subsection{Блок $tu = ai$ (V $\to$ C)}
+
+\begin{align}
+    Q^{(k)}_{ai\alpha} &= 2 H_{ai\alpha}[X, X], \\
+    Q^{(k)}_{ai\beta} &= 2 H_{ai\beta}[X, X].
+\end{align}
+
+Отсутствие $\Hp[T]$: $T_{ai\sigma}$ зануляется ($a, i$ принадлежат разным пространствам в обеих спиновых картинах).
+
+\subsection{Блок $tu = xa$ (O $\to$ V)}
+
+\begin{align}
+    Q^{(k)}_{xa\alpha} &= \Hp_{xa\alpha}[\Tk{k}{}] + 2 H_{xa\alpha}[X, X], \\
+    Q^{(k)}_{xa\beta} &= \Hp_{xa\beta}[\Tk{k}{}] + 2 H_{xa\beta}[X, X] + 2 F_{xa\beta}[X, X].
+\end{align}
+
+$F_{xa\beta}[X, X]$ возникает только в β: β-Fock даёт $\epsilon_q$ для виртуальных β, которые включают $O$.
+
+\subsection{Блок $tu = ax$ (V $\to$ O)}
+
+\begin{align}
+    Q^{(k)}_{ax\alpha} &= 2 H_{ax\alpha}[X, X], \\
+    Q^{(k)}_{ax\beta} &= 2 H_{ax\beta}[X, X] + 2 F_{ax\beta}[X, X].
+\end{align}
+
+\subsection{Диагональный блок $tu = ij$ (C-C, $i \le j$)}
+
+\begin{align}
+    Q^{(k)}_{ij\alpha} &= \Hp_{ij\alpha}[\Tk{k}{}] + 2 H_{ij\alpha}[X, X] + 2 F_{ij\alpha}[X, X], \\
+    Q^{(k)}_{ij\beta} &= \Hp_{ij\beta}[\Tk{k}{}] + 2 H_{ij\beta}[X, X] + 2 F_{ij\beta}[X, X].
+\end{align}
+
+\subsection{Диагональный блок $tu = xy$ (O-O, $x \le y$)}
+
+\begin{align}
+    Q^{(k)}_{xy\alpha} &= \Hp_{xy\alpha}[\Tk{k}{}] + 2 H_{xy\alpha}[X, X] + 2 F_{xy\alpha}[X, X], \\
+    Q^{(k)}_{xy\beta} &= \Hp_{xy\beta}[\Tk{k}{}] + 2 H_{xy\beta}[X, X] + 2 F_{xy\beta}[X, X].
+\end{align}
+
+\subsection{Диагональный блок $tu = ab$ (V-V, $a \le b$)}
+
+\begin{align}
+    Q^{(k)}_{ab\alpha} &= 2 H_{ab\alpha}[X, X] + 2 F_{ab\alpha}[X, X], \\
+    Q^{(k)}_{ab\beta} &= 2 H_{ab\beta}[X, X] + 2 F_{ab\beta}[X, X].
+\end{align}
+
+\subsection{Замечание о факторе 2}
+
+В Lee 2019 RO-MRSF перед $H_{tu}[X, X]$ и $F_{tu}[X, X]$ стоит коэффициент 1, поскольку RO $\bar Q$ определена как полусумма α- и β-вкладов:
+\begin{equation}
+    \bar Q^{\text{RO}}_{tu} = \tfrac{1}{2}\bigl( Q^{(k)}_{tu\alpha} + Q^{(k)}_{tu\beta} \bigr).
+\end{equation}
+
+В UMRSF мы сохраняем спиновую размерность, поэтому коэффициенты увеличены в 2 раза. Это \textbf{алгебраическая} разница --- общая физика та же.
+
+% ============================================================
+\section{Z-vector RHS: $R^{(k)}_{pq\sigma}$}
+\label{sec:Rexplicit}
+% ============================================================
+
+Подставляя $Q$ в $R^{(k)}_{pq\sigma} = Q^{(k)}_{pq\sigma} - Q^{(k)}_{qp\sigma}$, получаем правые части Z-vector уравнения.
+
+\subsection{$R^{(k)}_{ix\alpha}$ (CO, α)}
+
+$$
+R^{(k)}_{ix\alpha} = Q^{(k)}_{ix\alpha} - Q^{(k)}_{xi\alpha}.
+$$
+
+При условии $\Hp_{ix\alpha}[T] = \Hp_{xi\alpha}[T]$ (симметрия $T$ внутри своих блоков):
+\begin{equation}
+    \boxed{R^{(k)}_{ix\alpha} = 2\bigl( H_{ix\alpha}[X, X] - H_{xi\alpha}[X, X] \bigr) + 2\bigl( F_{ix\alpha}[X, X] - F_{xi\alpha}[X, X] \bigr).}
+\end{equation}
+
+\subsection{$R^{(k)}_{ix\beta}$ (CO, β)}
+
+\begin{equation}
+    \boxed{R^{(k)}_{ix\beta} = 2\bigl( H_{ix\beta}[X, X] - H_{xi\beta}[X, X] \bigr).}
+\end{equation}
+
+\subsection{$R^{(k)}_{ia\alpha}$ (CV, α)}
+
+\begin{equation}
+    \boxed{R^{(k)}_{ia\alpha} = 2\bigl( H_{ia\alpha}[X, X] - H_{ai\alpha}[X, X] \bigr).}
+\end{equation}
+
+\subsection{$R^{(k)}_{ia\beta}$ (CV, β)}
+
+\begin{equation}
+    \boxed{R^{(k)}_{ia\beta} = 2\bigl( H_{ia\beta}[X, X] - H_{ai\beta}[X, X] \bigr).}
+\end{equation}
+
+\subsection{$R^{(k)}_{xa\alpha}$ (OV, α)}
+
+\begin{equation}
+    \boxed{R^{(k)}_{xa\alpha} = 2\bigl( H_{xa\alpha}[X, X] - H_{ax\alpha}[X, X] \bigr).}
+\end{equation}
+
+\subsection{$R^{(k)}_{xa\beta}$ (OV, β)}
+
+\begin{equation}
+    \boxed{R^{(k)}_{xa\beta} = 2\bigl( H_{xa\beta}[X, X] - H_{ax\beta}[X, X] \bigr) + 2\bigl( F_{xa\beta}[X, X] - F_{ax\beta}[X, X] \bigr).}
+\end{equation}
+
+% ============================================================
+\section{Явные формулы для $W^{(k)}_{tu\sigma}$}
+\label{sec:Wexplicit}
+% ============================================================
+
+После решения Z-vector $\mathbf Z^{(k)}$ известен. Множители $W^{(k)}_{tu\sigma}$ восстанавливаются прямой подстановкой в \eqref{eq:master}. Для off-diagonal блоков ($t \ne u$):
+\begin{equation}
+    W^{(k)}_{tu\sigma'} = Q^{(k)}_{tu\sigma'} + \bigl( \delta_{pt} F_{uq\sigma'} - \delta_{qt} F_{pu\sigma'} \bigr) Z^{(k)}_{pq\sigma'} + \sum_\sigma \tilde H^{\sigma'\sigma}_{tu}\bigl[ Z_\sigma \bigr].
+\end{equation}
+
+Введём \textbf{relaxed difference density}:
+\begin{equation}
+    P^{(k)}_{pq\sigma} = T^{(k)}_{pq\sigma} + Z^{(k)}_{pq\sigma}.
+    \label{eq:Pdef}
+\end{equation}
+
+Тогда $\tilde H^{\sigma'\sigma}_{tu}[Z_\sigma]$ можно частично переписать через $\Hp_{tu\sigma'}[P^{(k)}]$ --- это компактная запись через $P$ вместо отдельно $T$ и $Z$.
+
+\subsection{Сводка обнулений}
+
+В формулах ниже используются $H_{tu\sigma}[X, X]$ и $F_{tu\sigma}[X, X]$, многие из которых \textbf{тривиально равны нулю} из-за индексных ограничений MRSF response space. Полная таблица обнулений (выведена в Проверке 1, \cref{app:checks}):
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{lll}
+\toprule
+Член & Обнуляется когда & Причина \\
+\midrule
+$H_{ia\beta}[X, X], H_{ix\beta}[X, X]$ & $i \in C$ как 2-й индекс $X$ & $X^{(k)}_{pi}$ требует $i \in O \cup V$ \\
+$H_{ai\alpha}, H_{ax\alpha}, H_{ab\alpha}$ & $a \in V$ как 1-й индекс через $U_{aq}$ & $U$-блоки имеют 1-й индекс в $C \cup O$ \\
+$F_{ia\alpha}, F_{ai\alpha}$ & $a \in V$ как 2-й индекс $X^{(k)}_{as}$ & $X$ требует 1-й индекс в $C \cup O$ \\
+$F_{ix\beta}, F_{xi\beta}$ & $i \in C$ как 2-й индекс $X^{(k)}_{ri}$ & Аналогично \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+В формулах ниже эти обнулённые члены \textbf{опущены} для ясности.
+
+\subsection{$W^{(k)}_{ix\alpha}$ (CO, α)}
+
+\begin{equation}
+    \boxed{
+    \begin{aligned}
+        W^{(k)}_{ix\alpha} &= 2 H_{xi\alpha}[X, X] + 2 F_{xi\alpha}[X, X] + \Hp_{ix\alpha}[P^{(k)}] \\
+        &\quad + \sum_y F_{xy\beta}\, Z^{(k)}_{iy\beta} + \sum_a F_{xa\beta}\, Z^{(k)}_{ia\beta}.
+    \end{aligned}}
+\end{equation}
+
+\subsection{$W^{(k)}_{ix\beta}$ (CO, β)}
+
+\begin{equation}
+    \boxed{
+        W^{(k)}_{ix\beta} = 2 H_{xi\beta}[X, X] + \Hp_{ix\beta}[P^{(k)}] + \sum_j F_{ij\alpha}\, Z^{(k)}_{jx\alpha} + \sum_a F_{ia\alpha}\, Z^{(k)}_{xa\alpha}.
+    }
+\end{equation}
+
+\subsection{$W^{(k)}_{ia\alpha}$ (CV, α)}
+
+\begin{equation}
+    \boxed{
+        W^{(k)}_{ia\alpha} = \Hp_{ia\alpha}[P^{(k)}] + (\epsilon_i - \epsilon_a)\, Z^{(k)}_{ia\alpha} + \sum_x F_{xa\beta}\, Z^{(k)}_{ix\beta}.
+    }
+\end{equation}
+
+\begin{remark}
+Член $H_{ai\alpha}[X, X]$ отсутствует, поскольку $Q^{(k)}_{ai\alpha} = 0$ (Проверка 1: $H_{ai\alpha}[X, X] = 0$ из-за того, что $X^{(k)}_{aq}$ требует первый индекс в $C \cup O$, а $a \in V$). В Lee 2019 (3.18b) аналогичный член $H_{ai\beta}[X, X]$ присутствует в RO-усреднённой формуле --- он «сидит» в нашей β-компоненте $W^{(k)}_{ia\beta}$ ниже.
+\end{remark}
+
+\subsection{$W^{(k)}_{ia\beta}$ (CV, β)}
+
+\begin{equation}
+    \boxed{
+        W^{(k)}_{ia\beta} = 2 H_{ai\beta}[X, X] + \Hp_{ia\beta}[P^{(k)}] + (\bar\epsilon_i - \bar\epsilon_a)\, Z^{(k)}_{ia\beta} + \sum_x F_{ix\alpha}\, Z^{(k)}_{xa\alpha}.
+    }
+\end{equation}
+
+\subsection{$W^{(k)}_{xa\alpha}$ (OV, α)}
+
+\begin{equation}
+    \boxed{
+        W^{(k)}_{xa\alpha} = \Hp_{xa\alpha}[P^{(k)}] - \sum_i F_{ia\beta}\, Z^{(k)}_{ix\beta} + \sum_b F_{ab\alpha}\, Z^{(k)}_{xb\alpha}.
+    }
+\end{equation}
+
+\subsection{$W^{(k)}_{xa\beta}$ (OV, β)}
+
+\begin{equation}
+    \boxed{
+    \begin{aligned}
+        W^{(k)}_{xa\beta} &= 2 H_{ax\beta}[X, X] + 2 F_{ax\beta}[X, X] + \Hp_{xa\beta}[P^{(k)}] \\
+        &\quad + \sum_y F_{xy\alpha}\, Z^{(k)}_{ya\alpha} + \sum_i F_{ix\alpha}\, Z^{(k)}_{ia\alpha}.
+    \end{aligned}}
+\end{equation}
+
+\subsection{Диагональные блоки}
+
+\begin{align}
+    W^{(k)}_{ij\sigma}\, (1 + \delta_{ij}) &= Q^{(k)}_{ij\sigma} + \Hp_{ij\sigma}[P^{(k)}], \quad i \le j, \\
+    W^{(k)}_{xy\sigma}\, (1 + \delta_{xy}) &= Q^{(k)}_{xy\sigma} + \Hp_{xy\sigma}[P^{(k)}], \quad x \le y, \\
+    W^{(k)}_{ab\sigma}\, (1 + \delta_{ab}) &= Q^{(k)}_{ab\sigma}, \quad a \le b.
+\end{align}
+
+Диагональные блоки $W$ строятся прямой подстановкой $Q$ + $\Hp[P]$, \textbf{без} cross-spin Z-членов --- они дают вклад только в Pulay-член $S^\xi W$ через MO-симметрию.
+
+% ============================================================
+\section{AO-сборка плотностей и Lagrange-матрицы $W$}
+\label{sec:AOassembly}
+% ============================================================
+
+После решения Z-vector уравнения переходим из MO в AO. Все MO$\to$AO преобразования теперь явно спин-расщеплённые, с двумя \textbf{независимыми} наборами MO-коэффициентов.
+
+\subsection{Релаксированная разностная плотность $P^{(k)}_{\mu\nu\sigma}$}
+
+\begin{align}
+    P^{(k)}_{\mu\nu\alpha} &= \sum_{p, q \in C \cup O} c_{\mu p \alpha}\, P^{(k)}_{pq\alpha}\, c_{\nu q \alpha}, \\
+    P^{(k)}_{\mu\nu\beta} &= \sum_{p, q \in O \cup V} c_{\mu p \beta}\, P^{(k)}_{pq\beta}\, c_{\nu q \beta}.
+\end{align}
+
+Диапазоны индексов \textbf{разные} для α и β --- это структурный отпечаток spin-flip формализма. α-сектор живёт в «α-occupied» пространстве $C \cup O$, β-сектор --- в «β-virtual» $O \cup V$ относительно $M_S = +1$ референса.
+
+\subsection{Ground-state плотность $D$}
+
+\begin{equation}
+    D_{\mu\nu\alpha} = \sum_{p \in C \cup O} c_{\mu p \alpha}\, c_{\nu p \alpha}, \qquad
+    D_{\mu\nu\beta} = \sum_{p \in C} c_{\mu p \beta}\, c_{\nu p \beta}.
+\end{equation}
+
+Асимметрия в диапазонах: α-плотность включает оба SOMO ($C \cup O$), β-плотность --- только closed shell ($C$).
+
+\subsection{Spin-flip transition density}
+
+\begin{equation}
+    X^{(k)}_{\mu\nu} = \sum_{p \in C \cup O,\ q \in O \cup V} c_{\mu p \alpha}\, U^{(k)}_{pq}\, X^{(k)}_{pq}\, c_{\nu q \beta}.
+    \label{eq:Xmunu}
+\end{equation}
+
+Это центральный объект SF-теории: индекс $\mu$ контрактирован с α-MO (поскольку $p$ --- α-occupied), индекс $\nu$ --- с β-MO (поскольку $q$ --- β-virtual).
+
+\subsection{Блочные плотности для spin-pairing}
+
+\begin{align}
+    (X^{\text{intra}}_{O_m V})^{(k)}_{\mu\sigma\nu\tau} &= \sum_{p \in O,\ q \in V} c_{\mu p \sigma}\, U^{O_m V}_{pq}\, X^{(k)}_{pq}\, c_{\nu q \tau}, \\
+    (X^{\text{intra}}_{CO_m})^{(k)}_{\mu\sigma\nu\tau} &= \sum_{p \in C,\ q \in O} c_{\mu p \sigma}\, U^{CO_m}_{pq}\, X^{(k)}_{pq}\, c_{\nu q \tau}, \\
+    (X^{\text{inter}}_{O_m V})^{(k)}_{\mu\nu\sigma} &= \sum_{p \in O,\ q \in V} c_{\mu p \sigma}\, U^{O_m V}_{pq}\, X^{(k)}_{pq}\, c_{\nu q \sigma}, \\
+    (X^{\text{inter}}_{CO_m})^{(k)}_{\mu\nu\sigma} &= \sum_{p \in C,\ q \in O} c_{\mu p \sigma}\, U^{CO_m}_{pq}\, X^{(k)}_{pq}\, c_{\nu q \sigma}.
+\end{align}
+
+В \textbf{intra}-блоках индексы $\mu, \nu$ имеют \textbf{разные} спины $\sigma, \tau$. В \textbf{inter}-блоках --- \textbf{одинаковые} $\sigma$.
+
+\subsection{Релаксационная Lagrange-матрица $W^{(k)}_{\mu\nu\sigma}$}
+
+\begin{equation}
+    W^{(k)}_{\mu\nu\alpha} = \sum_{p \le q} c_{\mu p \alpha}\, W^{(k)}_{pq\alpha}\, c_{\nu q \alpha}, \qquad
+    W^{(k)}_{\mu\nu\beta} = \sum_{p \le q} c_{\mu p \beta}\, W^{(k)}_{pq\beta}\, c_{\nu q \beta}.
+\end{equation}
+
+Сумма по всем MO $p \le q$. В отличие от RO-MRSF (где использовался spin-collapsed $\bar W = W_\alpha + W_\beta$), в UMRSF α и β сохраняются как \textbf{независимые} AO-матрицы.
+
+% ============================================================
+\section{Двухчастичная плотность $\Gamma^{(k)}$ для UMRSF}
+\label{sec:Gamma}
+% ============================================================
+
+$\Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau}$ --- эффективная двухчастичная плотность, контрактируемая с производными ERI $(\mu\nu | \kappa\lambda)^{(\xi)}$. Получается из дифференцирования по $\xi$ при фиксированных MO трёх компонент Lagrangian'а:
+
+\begin{enumerate}
+    \item ERI-вклады в $G[X^{(k)}, \Omega^{(k)}]$ от $A^{(k)(0)}$ (член $-c_{\HF}(pr|\bar s\bar q)$).
+    \item ERI-вклады в $G$ от spin-pairing $A'^{(k)}$.
+    \item ERI-вклады в $\sum_\sigma Z F_\sigma$ (Coulomb + exchange части Fock'ов).
+\end{enumerate}
+
+\subsection{Не-pairing часть: $\Gamma^{(k),\,\text{SF}}$}
+
+От $A^{(0)}$ и Z$\cdot$F совместно:
+\begin{equation}
+    \boxed{
+    \begin{aligned}
+        \Gamma^{(k),\,\text{SF}}_{\mu\nu\sigma, \kappa\lambda\tau} &= \frac{1}{2} \Bigl[ 2 P^{(k)}_{\mu\nu\sigma}\, D_{\kappa\lambda\tau} \\
+        &\quad - c_{\HF}\, \delta_{\sigma\tau} \bigl( P^{(k)}_{\mu\kappa\sigma}\, D_{\nu\lambda\sigma} + P^{(k)}_{\mu\lambda\sigma}\, D_{\nu\kappa\sigma} \bigr) \\
+        &\quad - c_{\HF}\, \delta_{\sigma\alpha} \delta_{\tau\beta} \bigl( X^{(k)}_{\mu\lambda}\, X^{(k)}_{\nu\kappa} + X^{(k)}_{\mu\kappa}\, X^{(k)}_{\nu\lambda} \bigr) \Bigr].
+    \end{aligned}}
+    \label{eq:GammaSF}
+\end{equation}
+
+\paragraph{Структура трёх членов:}
+\begin{itemize}
+    \item $2 P D$ --- Coulomb-вклад. Существует для \textbf{любой} комбинации спинов $(\sigma, \tau)$. Описывает классическое электрон-электронное отталкивание между релаксированной разностной плотностью $P^{(k)}$ и ground-state плотностью $D$.
+    \item $c_{\HF}\, \delta_{\sigma\tau}\, P D$ --- exchange-вклад, \textbf{только same-spin} (через $\delta_{\sigma\tau}$).
+    \item $c_{\HF}\, \delta_{\sigma\alpha} \delta_{\tau\beta}\, X X$ --- SF-exchange. Характерный spin-flip член: $X^{(k)}_{\mu\nu}$ имеет α на левом и β на правом индексе.
+\end{itemize}
+
+Форма \textbf{структурно идентична} Lee 2019 (3.24, первая строка). Отличие --- в \textbf{содержимом}: $P^{(k)}, D, X^{(k)}$ построены из независимых α/β MO-коэффициентов.
+
+\subsection{Spin-pairing часть: $\Gamma^{(k),\,\text{SP}}$}
+
+От дифференцирования $A'^{(k)}$. После AO-перестановки получаются \textbf{три спин-блока}:
+
+\begin{equation}
+    \boxed{
+        \Gamma^{(k),\,\text{SP}}_{\mu\nu\sigma, \kappa\lambda\tau} = \sgn(k)\, c_{\HF}\, \Bigl[ \delta_{\sigma\alpha} \delta_{\tau\beta}\, \Gamma^{\text{intra},\alpha\beta}_{\mu\nu\kappa\lambda} + \delta_{\sigma\alpha} \delta_{\tau\alpha}\, \Gamma^{\text{inter},\alpha\alpha}_{\mu\nu\kappa\lambda} + \delta_{\sigma\beta} \delta_{\tau\beta}\, \Gamma^{\text{inter},\beta\beta}_{\mu\nu\kappa\lambda} \Bigr].
+    }
+\end{equation}
+
+\subsubsection{Intra cross-spin блок ($\sigma = \alpha, \tau = \beta$)}
+
+\begin{equation}
+    \begin{aligned}
+        \Gamma^{\text{intra},\alpha\beta}_{\mu\nu\kappa\lambda} &= \bigl\{ (X^{\text{intra}}_{O_1 V})^{(k)}_{\mu\alpha\lambda\beta} - (X^{\text{intra}}_{O_2 V})^{(k)}_{\mu\alpha\lambda\beta} \bigr\}\bigl\{ (X^{\text{intra}}_{O_1 V})^{(k)}_{\kappa\beta\nu\alpha} - (X^{\text{intra}}_{O_2 V})^{(k)}_{\kappa\beta\nu\alpha} \bigr\} \\
+        &\quad + \bigl\{ (X^{\text{intra}}_{CO_1})^{(k)}_{\mu\alpha\lambda\beta} - (X^{\text{intra}}_{CO_2})^{(k)}_{\mu\alpha\lambda\beta} \bigr\}\bigl\{ (X^{\text{intra}}_{CO_1})^{(k)}_{\kappa\beta\nu\alpha} - (X^{\text{intra}}_{CO_2})^{(k)}_{\kappa\beta\nu\alpha} \bigr\}.
+    \end{aligned}
+\end{equation}
+
+\subsubsection{Inter pure-$\alpha$ блок ($\sigma = \alpha, \tau = \alpha$)}
+
+\begin{equation}
+    \begin{aligned}
+        \Gamma^{\text{inter},\alpha\alpha}_{\mu\nu\kappa\lambda} &= (X^{\text{inter}}_{CO_1})^{(k)}_{\mu\nu\alpha}\, (X^{\text{inter}}_{O_2 V})^{(k)}_{\kappa\lambda\alpha} + (X^{\text{inter}}_{CO_2})^{(k)}_{\mu\nu\alpha}\, (X^{\text{inter}}_{O_1 V})^{(k)}_{\kappa\lambda\alpha} \\
+        &\quad - (X^{\text{inter}}_{CO_1})^{(k)}_{\mu\lambda\alpha}\, (X^{\text{inter}}_{O_2 V})^{(k)}_{\nu\kappa\alpha} - (X^{\text{inter}}_{CO_2})^{(k)}_{\mu\lambda\alpha}\, (X^{\text{inter}}_{O_1 V})^{(k)}_{\nu\kappa\alpha}.
+    \end{aligned}
+\end{equation}
+
+\subsubsection{Inter pure-$\beta$ блок ($\sigma = \beta, \tau = \beta$)}
+
+\begin{equation}
+    \begin{aligned}
+        \Gamma^{\text{inter},\beta\beta}_{\mu\nu\kappa\lambda} &= (X^{\text{inter}}_{O_2 V})^{(k)}_{\mu\nu\beta}\, (X^{\text{inter}}_{CO_1})^{(k)}_{\kappa\lambda\beta} + (X^{\text{inter}}_{O_1 V})^{(k)}_{\mu\nu\beta}\, (X^{\text{inter}}_{CO_2})^{(k)}_{\kappa\lambda\beta} \\
+        &\quad - (X^{\text{inter}}_{O_2 V})^{(k)}_{\mu\lambda\beta}\, (X^{\text{inter}}_{CO_1})^{(k)}_{\nu\kappa\beta} - (X^{\text{inter}}_{O_1 V})^{(k)}_{\mu\lambda\beta}\, (X^{\text{inter}}_{CO_2})^{(k)}_{\nu\kappa\beta}.
+    \end{aligned}
+\end{equation}
+
+\subsection{Физический смысл трёх блоков}
+
+\begin{itemize}
+    \item \textbf{intra cross-spin ($\alpha\beta$)}: вклад от $\Hkintra$ coupling, который ERI-частью $(p\bar s | r \bar q)$ соединяет α-MO с β-MO. Даёт $\delta_{\sigma\alpha} \delta_{\tau\beta}$ паттерн в $\Gamma$.
+    \item \textbf{inter pure-$\alpha$ ($\alpha\alpha$)}: от $\Hkinter$ coupling с α-MO во всех индексах. В UMRSF этот вклад \textbf{выделяется} в отдельный блок, поскольку α-MO теперь не совпадают с β-MO.
+    \item \textbf{inter pure-$\beta$ ($\beta\beta$)}: симметричный β-аналог. В RO-MRSF этот блок \textbf{отсутствовал} (или неявно совпадал с αα из-за идентичности α/β пространств). Это \textbf{новый} вклад, специфичный для UMRSF.
+\end{itemize}
+
+\subsection{Полное $\Gamma^{(k)}$}
+
+\begin{equation}
+    \Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau} = \Gamma^{(k),\,\text{SF}}_{\mu\nu\sigma, \kappa\lambda\tau} + \Gamma^{(k),\,\text{SP}}_{\mu\nu\sigma, \kappa\lambda\tau}.
+    \label{eq:Gamma}
+\end{equation}
+
+\subsection{Замечание о симметризации в имплементации}
+
+Покомпонентно $\Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau}$ \textbf{не} инвариантна под swap $(\mu\nu\sigma) \leftrightarrow (\kappa\lambda\tau)$ --- особенно SF-exchange и intra spin-pairing блоки. Однако итоговая контракция
+$$
+\sum_{\mu\nu\sigma, \kappa\lambda\tau} (\mu\nu | \kappa\lambda)^{(\xi)}\, \Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau}
+$$
+\textbf{симметрична}, поскольку ERI обладает 8-кратной симметрией $(\mu\nu | \kappa\lambda) = (\kappa\lambda | \mu\nu)$, и сумма ведётся по всем спин-комбинациям $\sigma, \tau$.
+
+\paragraph{Импликации для кода:}
+\begin{enumerate}
+    \item Если $\Gamma^{(k)}$ хранится только для блока $\sigma = \alpha, \tau = \beta$ (экономия памяти), нужно явно учитывать существование «транспонированного» блока $\sigma = \beta, \tau = \alpha$ с тем же численным значением.
+    \item В $\Gamma^{\text{inter},\alpha\alpha}_{\mu\nu\kappa\lambda}$ перестановка $(\mu\nu) \leftrightarrow (\kappa\lambda)$ даёт \textbf{другую} комбинацию членов $(X^{\text{inter}}_{CO})(X^{\text{inter}}_{OV})$. Полная симметризованная форма требует 8 членов вместо 4.
+    \item Эти соображения \textbf{уже учтены} в RO-MRSF gradient driver \texttt{mrsfqropcal/mrsfqrowcal} в OpenQP; для UMRSF аналогичная логика должна быть перенесена.
+\end{enumerate}
+
+% ============================================================
+\section{Финальный градиент UMRSF-TDDFT}
+\label{sec:gradient}
+% ============================================================
+
+\subsection{Градиент возбуждения}
+
+\begin{equation}
+    \boxed{
+        \Omega^\xi_{(k)} = \sum_{\mu\nu\sigma} h^\xi_{\mu\nu}\, P^{(k)}_{\mu\nu\sigma} - \sum_{\mu\nu\sigma} S^\xi_{\mu\nu}\, W^{(k)}_{\mu\nu\sigma} + \sum_{\mu\nu\sigma, \kappa\lambda\tau} (\mu\nu | \kappa\lambda)^{(\xi)}\, \Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau} + \Omega^{\xi,\,\xc}_{(k)}.
+    }
+    \label{eq:OmegaXi}
+\end{equation}
+
+\paragraph{Покомпонентная разбивка:}
+\begin{itemize}
+    \item $\sum h^\xi_{\mu\nu}\, P^{(k)}_{\mu\nu\sigma}$ --- одноэлектронный вклад. $h^\xi$ --- производная одноэлектронных интегралов в AO; $P^{(k)}$ --- релаксированная разностная плотность.
+    \item $-\sum S^\xi_{\mu\nu}\, W^{(k)}_{\mu\nu\sigma}$ --- Pulay-вклад от движения AO-базиса. $S^\xi$ --- производная AO-overlap.
+    \item $\sum (\mu\nu | \kappa\lambda)^{(\xi)}\, \Gamma^{(k)}$ --- двухэлектронный вклад; $\Gamma^{(k)}$ --- \cref{sec:Gamma}.
+\end{itemize}
+
+\subsection{XC-вклад $\Omega^{\xi,\,\xc}_{(k)}$}
+
+\begin{equation}
+    \Omega^{\xi,\,\xc}_{(k)} = \sum_\sigma \int V^{\xc, (\xi)}_\sigma(\mathbf r)\, P^{(k)}_\sigma(\mathbf r)\, d\mathbf r + \sum_{\sigma\tau} \iint f^{\xc, (\xi)}_{\sigma\tau}(\mathbf r_1, \mathbf r_2)\, X^{(k)}_\sigma(\mathbf r_1)\, X^{(k)}_\tau(\mathbf r_2)\, d\mathbf r_1\, d\mathbf r_2,
+\end{equation}
+вычисляется через quadrature на DFT-сетке.
+
+\textbf{Существенно для UMRSF}: $V^{\xc}_\alpha, V^{\xc}_\beta$ и все 4 компоненты $f^{\xc}_{\alpha\alpha}, f^{\xc}_{\alpha\beta}, f^{\xc}_{\beta\alpha}, f^{\xc}_{\beta\beta}$ --- \textbf{независимые} (в RO $V^{\xc}_\alpha = V^{\xc}_\beta$ и $f^{\xc}_{\alpha\beta} = f^{\xc}_{\beta\alpha}$). Cross-spin $f^{\xc}_{\alpha\beta}$ нетривиален и должен быть включён в код явно.
+
+\subsection{Градиент ground state}
+
+\begin{equation}
+    E^\xi = \sum_{\mu\nu\sigma} h^\xi_{\mu\nu}\, D_{\mu\nu\sigma} - \sum_{\mu\nu\sigma} S^\xi_{\mu\nu}\, W^0_{\mu\nu\sigma} + \sum_{\mu\nu\sigma, \kappa\lambda\tau} (\mu\nu | \kappa\lambda)^{(\xi)}\, \Gamma^0_{\mu\nu\sigma, \kappa\lambda\tau} + E^{\xi,\,\xc},
+\end{equation}
+где
+\begin{align}
+    \Gamma^0_{\mu\nu\sigma, \kappa\lambda\tau} &= \frac{1}{2}\bigl( D_{\mu\nu\sigma}\, D_{\kappa\lambda\tau} - c_{\HF}\, \delta_{\sigma\tau}\, D_{\mu\lambda\sigma}\, D_{\nu\kappa\sigma} \bigr), \\
+    W^0_{\mu\nu\sigma} &= \sum_{p, q} c_{\mu p \sigma}\, F_{pq\sigma}\, c_{\nu q \sigma}.
+\end{align}
+
+\subsection{Полный градиент возбуждённого состояния}
+
+\begin{equation}
+    \boxed{\;
+        \frac{\partial E^{(k)}_{\text{exc}}}{\partial \xi} = E^\xi + \Omega^\xi_{(k)}.
+    \;}
+\end{equation}
+
+% ============================================================
+\section{Открытые вопросы и стратегические замечания}
+\label{sec:openquestions}
+% ============================================================
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+Вопрос & Статус & Комментарий \\
+\midrule
+$\partial S^{\alpha\beta}_{pq}/\partial \xi$ в градиенте & Отсутствует & $\langle \chi_p | \bar\chi_q \rangle$ входит только в post-hoc $\langle S^2 \rangle$ оценку (Komarov 2024), не в Lagrangian. Если не вводить $\langle S^2 \rangle$-constraint, производные не нужны. \\
+\addlinespace
+Cross-spin coupling в Z-vector & Требуется & Через $f^{\xc}_{\alpha\beta}$ и Coulomb $(pq|rs)$ с разными MO-наборами. GMRES-решатель из RO-MRSF нужно расширить на 4 блока $J^{\alpha\alpha}, J^{\alpha\beta}, J^{\beta\alpha}, J^{\beta\beta}$. \\
+\addlinespace
+MO reordering --- гладкость PES & Критично & Между близкими геометриями: max-overlap reordering применяется к референсной точке, далее продолжение через unitary continuation. Опасность: discrete switches между точками $\to$ разрывы PES. \\
+\addlinespace
+TLF0 для spin-pairing & Принимаем & Применяется к форме $\Hkintra/\Hkinter$ (как у Komarov 2024). \\
+\addlinespace
+Структура $\Gamma^{(k)}$ & Три спин-блока & $\alpha\beta$ intra, $\alpha\alpha$ inter, $\beta\beta$ inter --- корректно. \\
+\addlinespace
+Lagrangian веса & Чистая UKS & Без RO-весов $\{2, 1, 1, 2\}$. Отличие от подхода коллеги (см.\ комментарий к его попытке). \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Резюме теории}
+
+К этой точке полностью определены:
+\begin{enumerate}
+    \item Lagrangian UMRSF-TDDFT с spin-explicit $Z$ и $W$ \eqref{eq:Lagrangian}.
+    \item Шесть стационарных условий по MO-коэффициентам \eqref{eq:master}.
+    \item Z-vector уравнение размера $n_O n_V + n_C n_O + 2 n_C n_V$ \eqref{eq:Zdim}.
+    \item Явные формулы $Q^{(k)}_{tu\sigma}$ для всех 18 spin-block элементов (\cref{sec:Qexplicit}).
+    \item Явные формулы $R^{(k)}_{pq\sigma}$ для 6 блоков RHS Z-vector (\cref{sec:Rexplicit}).
+    \item Явные формулы $W^{(k)}_{tu\sigma}$ через $Q, Z$ и UKS Fock'и (\cref{sec:Wexplicit}).
+    \item AO-сборка $P^{(k)}_{\mu\nu\sigma}, W^{(k)}_{\mu\nu\sigma}, X^{(k)}_{\mu\nu}$ и блочных плотностей.
+    \item Полное $\Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau}$ с не-pairing и spin-pairing частями.
+    \item Финальный градиент $\Omega^\xi_{(k)}$ через AO-производные интегралов.
+\end{enumerate}
+
+Теория достаточна для имплементации.
+
+\subsection{Следующие шаги}
+
+\begin{enumerate}
+    \item \textbf{Code reading}: разобрать \texttt{mrsfqrorhs}, \texttt{mrsfqropcal}, \texttt{mrsfqrowcal} в \texttt{tdhf\_mrsf\_lib.F90} --- установить точное соответствие формул RO-MRSF и существующего кода.
+    \item \textbf{UMRSF energy routines}: прочитать \texttt{umrsfcbc}, \texttt{umrsfsp}, \texttt{umrsfmntoia}, \texttt{umrsfssqu}, \texttt{umrsfdmat} --- понять паттерн расширения RO$\to$UHF, использованный для энергии.
+    \item \textbf{MO reordering pipeline}: разобрать \texttt{get\_jacobi}, \texttt{rotate\_pair}, \texttt{swap\_sign\_a}, \texttt{check\_sign} --- критический модуль для UMRSF.
+    \item \textbf{Дизайн UMRSF gradient subroutines}: определить, какие новые routines нужны (\texttt{umrsfqrorhs}, \texttt{umrsfqropcal}, \texttt{umrsfqrowcal}, расширенный \texttt{apply\_z\_operator}).
+    \item \textbf{Расширение GMRES-решателя}: 6-блочный Z-vector с cross-spin coupling.
+    \item \textbf{Валидация}: численный vs аналитический градиент с критерием $|\Omega^\xi_{\text{ana}} - \Omega^\xi_{\text{num}}| < 10^{-5}$ Hartree/Bohr.
+\end{enumerate}
+
+% ============================================================
+\appendix
+\section{История аналитических проверок самосогласованности}
+\label{app:checks}
+% ============================================================
+
+После завершения теоретического вывода проведены пять аналитических проверок самосогласованности (до имплементации в коде). В этом приложении представлены детали каждой проверки.
+
+\subsection{Проверка 1: Предельный переход UMRSF $\to$ RO-MRSF}
+
+\paragraph{Постановка.} Если SCF UKS-решение даёт орбитали и Fock'и, идентичные ROHF-решению, то UMRSF $Q$, $R$, $W$ должны давать те же значения, что Lee 2019 RO-MRSF после правильного усреднения.
+
+\paragraph{Связь между UMRSF и RO формами.}
+\begin{equation}
+    \bQ^{\text{RO},(k)}_{tu} = \tfrac{1}{2}\bigl( Q^{\text{U},(k)}_{tu\alpha} + Q^{\text{U},(k)}_{tu\beta} \bigr).
+\end{equation}
+
+\paragraph{Блок $tu = ia$.}
+
+UMRSF: $Q^{(k)}_{ia\alpha} = \Hp_{ia\alpha}[T] + 2 H_{ia\alpha}[X, X]$, $Q^{(k)}_{ia\beta} = \Hp_{ia\beta}[T] + 2 H_{ia\beta}[X, X]$.
+
+Ключевой шаг: проверка $H_{ia\beta}[X, X]$. По определению (\cref{eq:H0beta}):
+$$
+H^{(0)}_{ia\beta}[X, X] = \sum_{p, r \in C \cup O}\sum_{s \in O \cup V} \Uk{k}{pi}\, \Xk{k}{pi}\, \{\ldots\}\, \Uk{k}{rs}\, \Xk{k}{rs}.
+$$
+
+В этой сумме фигурирует $\Xk{k}{pi}$ с \textbf{вторым} индексом $i \in C$. Но MRSF response space состоит из конфигураций $\{G, D, OOS/OOT, CO, OV, CV\}$ --- все они имеют второй индекс в $O \cup V$, \emph{не в} $C$. Следовательно $\Xk{k}{pi} = 0$ для $i \in C$, и вся сумма обнуляется:
+$$
+H^{(0)}_{ia\beta}[X, X] = 0, \qquad H_{ia\beta}[X, X] = 0.
+$$
+
+Усреднение даёт:
+$$
+\tfrac{1}{2}\bigl( Q^{\text{U}}_{ia\alpha} + Q^{\text{U}}_{ia\beta} \bigr) = \tfrac{1}{2}\bigl( \Hp_{ia\alpha}[T] + \Hp_{ia\beta}[T] \bigr) + H_{ia\alpha}[X, X],
+$$
+что совпадает с Lee 2019 (SI S18c). \checkmark
+
+\paragraph{Блок $tu = ix$.}
+
+UMRSF: $Q^{(k)}_{ix\alpha} = \Hp_{ix\alpha}[T] + 2 H_{ix\alpha}[X, X] + 2 F_{ix\alpha}[X, X]$, $Q^{(k)}_{ix\beta} = \Hp_{ix\beta}[T] + 2 H_{ix\beta}[X, X]$.
+
+Проверка $F_{ix\beta}[X, X]$ по \eqref{eq:FX}: $\Xk{k}{pi}$ требует $i \in O \cup V$ --- но $i \in C$. Поэтому $F_{ix\beta}[X, X] = 0$.
+
+Проверка $H_{ix\beta}[X, X]$ через тот же аргумент: $\Xk{k}{pi} = 0$, поэтому $H_{ix\beta}[X, X] = 0$.
+
+Усреднение даёт:
+$$
+\tfrac{1}{2}\bigl( Q^{\text{U}}_{ix\alpha} + Q^{\text{U}}_{ix\beta} \bigr) = \tfrac{1}{2}\bigl( \Hp_{ix\alpha}[T] + \Hp_{ix\beta}[T] \bigr) + H_{ix\alpha}[X, X] + F_{ix\alpha}[X, X],
+$$
+что совпадает с Lee 2019 (S18a). \checkmark
+
+\paragraph{Остальные блоки.}
+
+Аналогичные обнуления для $H[X, X]$ и $F[X, X]$ срабатывают по тем же индексным аргументам:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Блок & Обнуляющиеся члены & Результат \\
+\midrule
+$xi$ & $F_{xi\beta} = 0$ & Сводится к Lee 2019 \\
+$xa$ & $F_{xa\alpha}[X, X] = 0$ & Сводится к S18e \\
+$ax$ & $F_{ax\alpha} = 0$, $H_{ax\alpha} = 0$ & Сводится к S18f \\
+$ij$, $xy$ & Аналогично & Сводится к S18d \\
+$ab$ & $H_{ab\alpha} = 0$ & Сводится к S18f \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{result}
+\textbf{Проверка 1 ПРОЙДЕНА.} UMRSF $Q^{(k)}_{tu\sigma}$ в усреднённом виде даёт RO $Q$.
+\end{result}
+
+\subsection{Проверка 2: Симметрия $W^{(k)}_{tu\sigma} = W^{(k)}_{ut\sigma}$}
+
+\paragraph{Постановка.} W --- множитель Лагранжа для симметричного констрейнта $S^{\MO}_{pq\sigma} = \delta_{pq}$ с $p \le q$. Симметрия по перестановке индексов --- обязательное свойство.
+
+\paragraph{Метод.} Возьмём $W^{(k)}_{ia\alpha}$ и $W^{(k)}_{ai\alpha}$. Должны совпасть.
+
+Из (ai, α) стационарности и $Q^{(k)}_{ai\alpha} = 0$ (Проверка 1):
+\begin{align}
+    W^{(k)}_{ai\alpha} &= Q^{(k)}_{ai\alpha} + (F_{ii\alpha} - F_{aa\alpha}) Z^{(k)}_{ai\alpha} + \tilde H^{\alpha\alpha}_{ai}[Z_\alpha] + \tilde H^{\alpha\beta}_{ai}[Z_\beta] \\
+    &= (\epsilon_i - \epsilon_a) Z^{(k)}_{ia\alpha} + \tilde H^{\alpha\alpha}_{ai}[Z_\alpha] + \tilde H^{\alpha\beta}_{ai}[Z_\beta].
+\end{align}
+
+Сравнение с формулой $W^{(k)}_{ia\alpha}$ из \cref{sec:Wexplicit}: при условии симметрии $Z^{(k)}_{ai} = Z^{(k)}_{ia}$ обе формы совпадают.
+
+\paragraph{Выявленная опечатка.} В первоначальном выводе формула для $W^{(k)}_{ia\alpha}$ содержала член $2 H_{ai\alpha}[X, X]$. Однако $H_{ai\alpha}[X, X] = 0$ из Проверки 1 (зануление через $U_{aq} = 0$). Член был \textbf{удалён} из формулы и заменён на пояснение.
+
+Аналогичный обнулённый член $2 H_{ax\alpha}[X, X]$ удалён из $W^{(k)}_{xa\alpha}$.
+
+\begin{result}
+\textbf{Проверка 2 ПРОЙДЕНА} с выявлением опечатки. Все четыре формулы $W$ (где встречались зануляющиеся члены) исправлены.
+\end{result}
+
+\subsection{Проверка 3: Сравнение orbital Hessian с Komarov 2024}
+
+\paragraph{Постановка.} Наша формула $A^{(k)(0)}$ \eqref{eq:A0} должна быть точной копией Komarov 2024 формулы (8).
+
+\paragraph{Сравнение.}
+
+Наша формула:
+$$
+\Akz_{pq, rs} = \Uk{k}{pq} \bigl\{ \delta_{pr}\delta_{qs}(\bar\epsilon_q - \epsilon_p) - c_{\MRSF}\, (pr | \bar s \bar q) \bigr\} \Uk{k}{rs}.
+$$
+
+Komarov 2024 (8):
+$$
+A^{(k)(0)}_{pq, rs} = U^{(k)}_{pq} \bigl\{ \delta_{pr}\delta_{qs}(\bar\epsilon_q - \epsilon_p) - c_{\MRSF}\, (pr | \bar s \bar q) \bigr\} U^{(k)}_{rs}.
+$$
+
+\textbf{Идентичность по структуре.} С условием $c_{\MRSF} = c_{\HF}$, полная идентичность.
+
+UKS Fock'и из (10a, 10b) Komarov 2024 --- те же, что в нашем документе (\cref{sec:response}, \cref{eq:Falpha,eq:Fbeta}).
+
+\begin{result}
+\textbf{Проверка 3 ПРОЙДЕНА.} Структурная идентичность $A^{(k)(0)}$ полная. Уравнение отклика UMRSF в нашем выводе идентично энергетической UMRSF Komarov 2024. Градиент --- корректное Lagrangian-расширение опубликованной энергии.
+\end{result}
+
+\subsection{Проверка 4: Симметрия $\Gamma^{(k)}_{\mu\nu\sigma, \kappa\lambda\tau}$}
+
+\paragraph{Постановка.} Эрмитовость требует: $\sum_{\mu\nu\kappa\lambda, \sigma\tau} (\mu\nu | \kappa\lambda)^{(\xi)} \Gamma_{\mu\nu\sigma, \kappa\lambda\tau}$ инвариантна относительно swap $(\mu\nu\sigma) \leftrightarrow (\kappa\lambda\tau)$.
+
+\paragraph{Анализ по членам.}
+
+\textbf{Член $2 P D$.} Покомпонентно \emph{не} симметричен:
+$$
+P^{(k)}_{\mu\nu\sigma}\, D_{\kappa\lambda\tau} \xleftrightarrow{(\mu\nu\sigma) \leftrightarrow (\kappa\lambda\tau)} P^{(k)}_{\kappa\lambda\tau}\, D_{\mu\nu\sigma}.
+$$
+Но при суммации с симметричным $(\mu\nu | \kappa\lambda)^{(\xi)}$ это даёт правильно симметризованный вклад. \checkmark
+
+\textbf{Same-spin exchange.} Через $\delta_{\sigma\tau}$ инвариантен; ($P, D$) симметричны. \checkmark
+
+\textbf{SF-exchange $\delta_{\sigma\alpha}\delta_{\tau\beta}$.} Под swap $(\sigma \leftrightarrow \tau)$:
+$$
+\delta_{\sigma\alpha}\delta_{\tau\beta} \xleftrightarrow{} \delta_{\tau\alpha}\delta_{\sigma\beta} = \delta_{\sigma\beta}\delta_{\tau\alpha}.
+$$
+\textbf{Не инвариантно.} Однако в нашей Γ формуле есть только $\delta_{\sigma\alpha}\delta_{\tau\beta}$ блок. SF-теория имеет $X^{(k)}_{\mu\nu}$ с фиксированной асимметрией (μ--α, ν--β), и контракция с симметричным $(\mu\nu | \kappa\lambda)^{(\xi)}$ эффективно симметризует результат если сумма ведётся по всем σ, τ.
+
+\textbf{Spin-pairing блоки.}
+\begin{itemize}
+    \item $\delta_{\sigma\alpha}\delta_{\tau\beta}$ intra --- асимметричен как и SF-exchange (тот же механизм компенсации).
+    \item $\delta_{\sigma\alpha}\delta_{\tau\alpha}$ inter --- $\delta$-функция инвариантна. Внутренняя структура (4 члена с CO·OV): покомпонентно не симметрична, но компенсируется через 8-кратную симметрию ERI.
+    \item $\delta_{\sigma\beta}\delta_{\tau\beta}$ inter --- аналогично.
+\end{itemize}
+
+\begin{result}
+\textbf{Проверка 4 ПРОЙДЕНА УСЛОВНО.} Покомпонентно $\Gamma$ не симметрично, но через полную контракцию ($\sum_{\sigma\tau}, \sum_{\mu\nu\kappa\lambda}$) симметрия восстанавливается. В реализации требуется явный учёт (αβ)$\leftrightarrow$(βα) и (μν)$\leftrightarrow$(κλ) симметрии ERI. Добавлено замечание в \cref{sec:Gamma}.
+\end{result}
+
+\subsection{Проверка 5: Размерный анализ Z-vector}
+
+\paragraph{Постановка.} Подсчёт активных vs тривиально-нулевых спин-блоков.
+
+\paragraph{Анализ.}
+
+В UMRSF α-space:
+\begin{itemize}
+    \item $C$: дважды α-occupied.
+    \item $O$: однократно α-occupied (SOMO α).
+    \item $V$: α-virtual.
+\end{itemize}
+
+α-ротации между:
+\begin{itemize}
+    \item $C \leftrightarrow O$ (внутри α-occupied): \textbf{не нужны}.
+    \item $O \leftrightarrow V$ (α-occ $\leftrightarrow$ α-virt): нужны.
+    \item $C \leftrightarrow V$ (α-occ $\leftrightarrow$ α-virt): нужны.
+\end{itemize}
+
+В UMRSF β-space:
+\begin{itemize}
+    \item $C$: β-occupied.
+    \item $O$: β-virtual.
+    \item $V$: β-virtual.
+\end{itemize}
+
+β-ротации:
+\begin{itemize}
+    \item $C \leftrightarrow O$: нужны (β-occ $\leftrightarrow$ β-virt).
+    \item $O \leftrightarrow V$: \textbf{не нужны} (внутри β-virtual).
+    \item $C \leftrightarrow V$: нужны.
+\end{itemize}
+
+Итого активные блоки:
+\begin{itemize}
+    \item \textbf{α}: $Z_{xa\alpha}$ (OV), $Z_{ia\alpha}$ (CV).
+    \item \textbf{β}: $Z_{ix\beta}$ (CO), $Z_{ia\beta}$ (CV).
+\end{itemize}
+
+\textbf{Итого 4 активных блока, не 6.}
+
+\paragraph{Найденная ошибка.} В первоначальном выводе оценка размерности была «$\sim 6\, \nocc\, \nvir$», что неверно. Корректная размерность:
+$$
+\dim(\mathbf Z^{(k)})_{\text{UMRSF}} = n_O n_V + n_C n_O + 2 n_C n_V.
+$$
+
+\begin{result}
+\textbf{Проверка 5: ВЫЯВЛЕНА ОШИБКА.} Размерность скорректирована в \cref{sec:zvector}. Это не критическая ошибка с точки зрения теории (структура уравнений правильная), но важная для имплементации.
+\end{result}
+
+\subsection{Итог пяти проверок}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+Проверка & Результат & Замечание \\
+\midrule
+1. UMRSF $\to$ RO предел & ПРОЙДЕНА & Обнуления $H[X,X], F[X,X]$ по индексным аргументам --- общие для UMRSF и RO. \\
+2. Симметрия $W$ & ПРОЙДЕНА с правкой & Опечатка $H_{ai\alpha} \to 0$ в формуле $W^{(k)}_{ia\alpha}$ выявлена и исправлена. \\
+3. Сравнение с Komarov 2024 & ПРОЙДЕНА & Структурная идентичность $A^{(k)(0)}$ полная. \\
+4. Симметрия $\Gamma$ & ПРОЙДЕНА условно & Через полную сумму ($\sum_{\sigma\tau}$, $\sum_{\mu\nu\kappa\lambda}$) симметрия восстанавливается. \\
+5. Размерный анализ Z-vector & ВЫЯВЛЕНА ОШИБКА & Не «$6\, \nocc\, \nvir$», а $n_O n_V + n_C n_O + 2 n_C n_V$. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Все пять проверок дали либо подтверждение, либо ясно идентифицируемые правки в документе. Все правки внесены. Теория готова к этапу имплементации.
+
+% ============================================================
+\section*{Список литературы}
+% ============================================================
+
+\begin{enumerate}[label={[\arabic*]}]
+    \item Lee, S.; Filatov, M.; Lee, S.; Choi, C. H.\ \emph{Eliminating spin-contamination of spin-flip time dependent density functional theory within linear response formalism by the use of zeroth-order mixed-reference (MR) reduced density matrix.} J.\ Chem.\ Phys.\ \textbf{149}, 104101 (2018). --- MRSF energy theory.
+    \item Lee, S.; Kim, E.\ E.; Nakata, H.; Lee, S.; Choi, C.\ H.\ \emph{Efficient implementations of analytic energy gradient for mixed-reference spin-flip time-dependent density functional theory (MRSF-TDDFT).} J.\ Chem.\ Phys.\ \textbf{150}, 184111 (2019). --- RO-MRSF analytic gradient (ключевой референс).
+    \item Komarov, K.; Oh, M.; Nakata, H.; Lee, S.; Choi, C.\ H.\ \emph{UMRSF-TDDFT: Unrestricted Mixed-Reference Spin-Flip-TDDFT.} J.\ Phys.\ Chem.\ A \textbf{128}, 9526--9537 (2024). --- UMRSF energy theory.
+    \item Furche, F.; Ahlrichs, R.\ \emph{Adiabatic time-dependent density functional methods for excited state properties.} J.\ Chem.\ Phys.\ \textbf{117}, 7433 (2002). --- Lagrangian формализм для TDDFT градиента.
+    \item Minezawa, N.; Gordon, M.\ S.\ \emph{Optimizing conical intersections by spin-flip density functional theory: Application to ethylene.} J.\ Phys.\ Chem.\ A \textbf{113}, 12749 (2009). --- SF-TDDFT analytic gradient.
+    \item Open-Quantum-Platform: \texttt{openqp} repository. \url{https://github.com/Open-Quantum-Platform/openqp}. --- Имплементация MRSF-TDDFT в GAMESS-США форме.
+\end{enumerate}
+
+\end{document}

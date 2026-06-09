@@ -1,0 +1,35 @@
+# ROHF MRSF-TDDFT energy of H2O, BHHLYP/6-31G(d). RO-limit reference for the
+# UMRSF Q/R test: with an ROHF reference mo_a == mo_b, so the UMRSF builders must
+# reduce to the golden RO sfrorhs result (Check 1 / RO-limit, Phase 2).
+[input]
+system=
+ O   0.0000000000   0.0000000000   0.1172143154
+ H   0.0000000000   0.7572153434  -0.4688572616
+ H   0.0000000000  -0.7572153434  -0.4688572616
+charge=0
+method=tdhf
+runtype=energy
+functional=bhhlyp
+basis=6-31g*
+
+[guess]
+type=huckel
+save_mol=false
+
+[scf]
+type=uhf
+multiplicity=3
+converger_type=diis
+maxit=200
+conv=1.0e-9
+
+[dftgrid]
+rad_npts=96
+ang_npts=302
+
+[tdhf]
+type=umrsf
+nstate=5
+multiplicity=1
+conv=1.0e-9
+zvconv=1.0e-10
