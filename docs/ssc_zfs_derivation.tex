@@ -1,0 +1,108 @@
+% SSC/ZFS derivation & audit document  (project branch: ssc-zfs)
+% Purpose: external-reviewer-auditable derivation of the first-order direct dipolar spin-spin
+% contribution to the ZFS D-tensor for MRSF-TDDFT in OpenQP. See CLAUDE.md (esp. §3, §10).
+% Mirrored to the Overleaf project at /bighome/vova/coding/SSC/overleaf.
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,bm,braket,geometry,booktabs,hyperref}
+\geometry{margin=1in}
+
+\title{First-Order Direct Spin--Spin Contribution to the Zero-Field-Splitting
+$\mathbf{D}$-Tensor for MRSF-TDDFT in OpenQP\\[4pt]\large Derivation and Convention Audit}
+\author{OpenQP \texttt{ssc-zfs} project}
+\date{\today}
+
+\newcommand{\Pab}{P^{(\alpha-\beta)}}
+\newcommand{\rkl}{\dfrac{3\,r_{12,k}\,r_{12,l}-\delta_{kl}\,r_{12}^2}{r_{12}^5}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document re-derives the working equation for the first-order direct dipolar spin--spin (SS)
+contribution to the zero-field-splitting (ZFS) $\mathbf{D}$-tensor, resolves the prefactor/sign
+convention discrepancy between the source papers, fixes the final prefactor numerically against
+the O$_2$ benchmark, and records all assumptions for out-of-band review. It is a living document
+updated as the implementation clears its stage gates (L1$\to$L2$\to$L3). \textbf{Status: skeleton.}
+\end{abstract}
+
+\tableofcontents
+
+\section{Scope}
+First order only; sole physical input is the one-particle spin density $\Pab$ at $M_S=S$.
+Z-vector/relaxed densities, gradients of $\mathbf{D}$, and SOC cross terms are out of scope.
+
+\section{Working equation (canonical form)}
+McWeeny--Mizuno [Proc.\ R.\ Soc.\ London A \textbf{259}, 554 (1961)], in the form of
+Sinnecker \& Neese, J.\ Phys.\ Chem.\ A \textbf{110}, 12267 (2006), Eq.~(9):
+\begin{equation}
+D^{SS}_{kl} = C \sum_{\mu\nu}\sum_{\kappa\tau}
+  \Big\{\Pab_{\mu\nu}\Pab_{\kappa\tau}-\Pab_{\mu\kappa}\Pab_{\nu\tau}\Big\}\,
+  \Big\langle \mu\nu \Big| \rkl \Big| \kappa\tau \Big\rangle ,
+  \label{eq:working}
+\end{equation}
+with $k,l\in\{x,y,z\}$; $\mathbf{D}$ symmetric and traceless. The kernel is the Hessian of
+$1/r_{12}$ w.r.t.\ the interelectronic vector; the integral is two-electron, ERI-like.
+
+\section{Convention discrepancy and its resolution}\label{sec:conv}
+\textbf{The prefactor and sign differ between sources and must not be reconciled by algebra alone}
+(see CLAUDE.md~\S3). Recorded verbatim:
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+source & prefactor $C$ & kernel sign & bracket \\
+\midrule
+Sinnecker--Neese 2006, Eq.~(9) & $+\,g_e^2\alpha^2/[4S(2S-1)]$ & $(3rr-\delta r^2)$ & $\langle\mu\nu|\cdots|\kappa\tau\rangle$ \\
+Neese 2007 (JCP 127,164112), Eq.~(46) & $-\,g_e^2\alpha^2/[16S(2S-1)]$ & $(3rr-\delta r^2)$ & $\langle\mu\nu|\cdots|\kappa\tau\rangle$ \\
+Neese 2007, Eq.~(1) (operator) & (see text) & $(\delta r^2-3rr)$ & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+Eqs.~(9) and (46) share the kernel sign and density grouping yet differ in $C$ by a factor
+$-1/4$; Eq.~(1) flips the kernel sign. \textbf{Resolution (to be filled at gate L2):} adopt the
+algebraic \emph{form} of Eq.~\eqref{eq:working}; determine the numerical $C$ (magnitude and sign)
+by matching the O$_2$ benchmark. % TODO(L2): insert pinned C, sign, and the match table.
+
+\section{Units}
+% TODO: a.u. -> cm^{-1} conversion; role of g_e and alpha; document the exact factor used.
+
+\section{Spin density at $M_S=S$ (Wigner--Eckart)}
+% TODO: Pokhilko-Krylov 2019; relate the M_S=S one-particle spin density to the single reduced
+% density (highest-spin generator); reuse of soc_mrsf compute_tdm.
+
+\section{Integral evaluation}
+% TODO: Path A (ERI engine + derivative kernel) vs Path B (direct Rys, comp_soc_int2_prim);
+% record which passed L1 and why.
+
+\section{Assumptions log}
+% TODO: every non-obvious choice (reference determinant RO/UNO, mean-field factorization for
+% multiconfig MRSF densities, screening, etc.), with justification.
+\begin{itemize}
+  \item Reference determinant: RO/UNO-type density preferred (UKS overestimates $D^{SS}$;
+        ROKS$\approx$UNO -- Neese 2007 \S E). UMRSF exposes a density-source flag.
+  \item (add as the project proceeds)
+\end{itemize}
+
+\section{Results table}\label{sec:results}
+Updated as gates clear (value vs reference vs tolerance, pass/fail).
+\begin{center}
+\begin{tabular}{@{}lrrrl@{}}
+\toprule
+system & computed & reference & tol. & gate \\
+\midrule
+O$_2$\,$^3\Sigma_g^-$ (1.207\,\AA) & --- & $1.44$--$1.6$\,cm$^{-1}$ & few\,\% & L2 \\
+benzene & --- & $0.1593$\,cm$^{-1}$ & RMSD$\sim$0.0035 & L3 \\
+naphthalene & --- & $0.1004$ & & L3 \\
+anthracene & --- & $0.0702$ & & L3 \\
+tetracene & --- & $0.0573$ & & L3 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{References (key)}
+Sinnecker \& Neese, JPCA 110, 12267 (2006);
+Neese, JCP 127, 164112 (2007);
+Neese, JACS 128, 10213 (2006);
+Pokhilko, Epifanovsky \& Krylov, JCP 151, 034106 (2019);
+McWeeny \& Mizuno, Proc.\ R.\ Soc.\ A 259, 554 (1961).
+
+\end{document}
