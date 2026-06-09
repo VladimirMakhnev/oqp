@@ -10,8 +10,10 @@
 - **Phase:** 1 — L1 integral implemented (P1.2 done). P1.3 self-test PASSES in testing; the L1
   **stage gate is NOT yet declared** — awaiting human confirmation (per session instruction).
 - **Gate cleared:** **L1 ☑ (s,p,d; human-confirmed for s,p 2026-06-09; d extended same day).**
-- **NOW:** starting **Phase 2 / P2.1** (the `{P_μν P_κτ − P_μκ P_ντ}` contraction + ROHF density).
-  Per instruction: do NOT attempt the L2 O₂ pin yet — stop before L2.
+- **P2.1 built** (SS→D-tensor AO contraction; runs, traceless). **STOPPED before L2** per instruction.
+- **NEXT STEP:** L2 — (i) get a clean O₂ ³Σ_g⁻ ROHF reference (axial D about z; see P2.1 flag),
+  (ii) P2.2 diagonalise → D,E and a.u.→cm⁻¹, (iii) **pin `C`/sign numerically** on `D^SS≈1.44–1.6
+  cm⁻¹`. Do NOT trust the raw P2.1 magnitude until then.
 - **NEXT STEP:** await confirmation of L1. On confirmation, mark L1 ☑ and begin **Phase 2 / P2.1**
   (the `{P_μν P_κτ − P_μκ P_ντ}` contraction + ROHF; then pin `C` on O₂ at L2). Possible follow-up
   before L2: extend the SS integral / FD self-test to **d shells** (currently s,p validated;
@@ -77,8 +79,22 @@
     deferred (spherical-harmonic transform). **Gate L1 — NOT declared; awaiting confirmation.**
 
 ## PHASE 2 — L2: contraction + ROHF, pin `C`  (gate: §7 L2)
-- ☐ **P2.1** Build the `{P_μν P_κτ − P_μκ P_ντ}` contraction as a Fock/K-like consumer
-  (template: `int2_mrsf_data_t`, `tdhf_mrsf_lib.F90`). Input: ROHF `P^(α−β)` (M_S = S).
+- ☑ **P2.1 (built + structurally validated; absolute correctness deferred to L2).** Contraction
+  driver `source/modules/ssc_zfs.F90`:
+  - `compute_ssc_dtensor_raw` — loops all shell quartets, accumulates the contracted **cartesian**
+    SS integral block over primitives (`comp_ssc_int2_prim`), makes it traceless (`S=H−⅓Tr(H)I`),
+    and contracts with the ROHF spin density `P^(α−β)=DM_A−DM_B` (M_S=S, exact for a single
+    determinant) in the Coulomb-like (`P_μν P_κτ`) **minus** exchange-like (`P_μκ P_ντ`) patterns,
+    giving the 6 components. bfnrm absorbed by pre-scaling the density `Q_μν=P_μν·bfnrm_μ·bfnrm_ν`
+    (lets the cartesian integrals be contracted directly).
+  - `ssc_dtensor_selftest` (`bind(C)`, `include/oqp.h`, `tests/test_ssc_dtensor.py`).
+  - **RESULT (O₂ ³Σ_g⁻ @ 1.207 Å, ROHF/6-31G*, C=1):** runs; **Tr(D)=−4.5e-15** (traceless
+    invariant holds); off-diagonals ~0; raw components `Dxx=+0.521, Dyy=−0.248, Dzz=−0.273` (a.u.).
+  - **FLAG for L2:** the raw tensor is **not axial about the molecular z-axis** (Dxx is the outlier,
+    Dyy≈Dzz) — expected D for O₂ ³Σ_g⁻ is axial about z. This is almost certainly the **reference
+    state** (plain Huckel→ROHF need not give the cylindrically-symmetric ³Σ_g⁻ π* occupation); it is
+    an L2 concern (right state + `C`/unit pin), NOT a contraction bug (the 6 integral components are
+    L1-validated vs FD; Tr(D)=0 holds). Resolve at L2 before trusting the magnitude.
 - ☐ **P2.2** Assemble the 6-component D-tensor; diagonalise → `D`, `E`, `E/D`; unit a.u.→cm⁻¹.
 - ☐ **P2.3** **Pin `C` and sign NUMERICALLY on O₂ ³Σ_g⁻ @ 1.207 Å** (target `D^SS ≈ 1.44–1.6
   cm⁻¹`). Record pinned value + match in the LaTeX doc. Cross-check CH₂ ³B₁. **Gate L2.**
@@ -95,6 +111,12 @@ Z-vector / relaxed densities, response/relaxation terms, analytic gradients of D
 ---
 
 ## RUNNING LOG  (newest first — one short entry per `-p` run)
+- 2026-06-09 — **P2.1 contraction built (stopped before L2).** Implemented `source/modules/ssc_zfs.F90`
+  (`compute_ssc_dtensor_raw` + `ssc_dtensor_selftest`): contracts the L1-validated SS integral with
+  the ROHF spin density `DM_A−DM_B` (Coulomb − exchange), bfnrm absorbed via density pre-scaling.
+  O₂ ³Σ_g⁻/6-31G* ROHF, C=1: runs, **Tr(D)=−4.5e-15** (traceless ✓), Dxx/Dyy/Dzz=+0.521/−0.248/−0.273.
+  Flagged: raw tensor not axial about z → reference-state issue to fix at L2 (not a contraction bug).
+  Per instruction, STOPPED before L2 (no `C` pin / no number match). NEXT: L2 (clean ³Σ_g⁻ + pin C).
 - 2026-06-09 — **L1 confirmed (s,p) + extended to d; gate ☑.** Human confirmed L1 for s,p. Found
   OpenQP is fully **cartesian** (no spherical transform), so extended the SS integral + FD self-test
   to **d** shells by lifting the `am≤1` cap and refactoring the FD to compute displaced-ERI blocks
