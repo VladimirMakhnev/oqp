@@ -7,12 +7,13 @@
 ## CURRENT STATUS
 
 - **Branch:** `ssc-zfs` (off `SSC` @ baseline 222/225 tests passing).
-- **Phase:** 0 — scaffolding complete; implementation NOT started (per session setup, deliberately).
-- **Gate cleared:** none yet.
-- **NEXT STEP (first `-p` task):** **P1.1** — choose integral route (Path A vs B) and stand up the
-  L1 finite-difference integral unit test harness (`tests/test_ssc_integrals_fd.py`, skeleton
-  already present) against the existing ERI engine. Do NOT pin `C` yet (that is L2); L1 only
-  checks the *integral* values and trace = 0.
+- **Phase:** 1 — L1 integral work in progress. P1.1 done (route decided + closed form derived and
+  numerically validated against analytic oracles). Native Fortran integral NOT started.
+- **Gate cleared:** none yet. (P1.1 is a decision/prototype task; it is NOT a stage gate.)
+- **NEXT STEP:** **P1.2** — implement the SS dipolar 2e integral in OpenQP via **Path A** (drive
+  the ERI engine with the Hessian-of-1/r₁₂ kernel) for general angular momenta, reusing
+  `rys_deriv.F90` / `grd2_rys.F90`. Then **P1.3** = the real L1 gate: FD vs OpenQP's *actual* ERI
+  engine (the prototype below already proves the closed form is right; P1.3 proves the Fortran is).
 
 ---
 
@@ -24,9 +25,22 @@
 - ☑ Reuse map recorded in `CLAUDE.md §5`.
 
 ## PHASE 1 — L1: 2e SS integral + FD validation  (gate: §7 L1)
-- ☐ **P1.1** Decide Path A (ERI engine w/ derivative kernel) vs Path B (direct Rys, model on
-  `comp_soc_int2_prim`). Prototype the rank-2 dipolar kernel `(3 r_k r_l − δ_kl r²)/r⁵` for one
-  shell quartet (s,s,s,s) first.
+- ☑ **P1.1** **Path A decided** (drive the ERI engine with the Hessian-of-1/r₁₂ kernel; the SS 2e
+  integral is exactly that Hessian → reuse ERI machinery, no new Rys primitive needed for the
+  validation). Closed form for the (s,s,s,s) quartet derived and numerically validated by a
+  standalone prototype (`tests/ssc_prototype_ssss.py`), triangulated three ways. **NOT a stage
+  gate** (validated vs an analytic oracle, not OpenQP's ERI engine — that is P1.3).
+  - Derivation: bare-Hessian integral
+    `H_kl = pref·K·[4ρ²R_kR_l F₂(T) − 2ρδ_kl F₁(T)]`, `pref=2π^{5/2}/(pq√(p+q))`, `R=P−Q`, `T=ρR²`.
+  - Physical dipolar integral = **traceless part** of H: `S = H − ⅓Tr(H)·I = H + (4π/3)O·I`,
+    `O=⟨ρ₁|ρ₂⟩=K(π/(p+q))^{3/2}e^{−T}`. Distributional identity:
+    `∂_k∂_l(1/r) = (3r_kr_l−δ_kl r²)/r⁵ − (4π/3)δ_kl δ³(r)`; the contact term is the isotropic
+    part removed by tracelessness (does not enter the ZFS D-tensor).
+  - Validation numbers (run in `ssc-pyenv`): closed-form H **vs** Richardson-FD-of-ERI rel **2.3e-9**;
+    closed-form H **vs** Boys-free t-quadrature rel **9.9e-14**; `Tr(S)=−3.9e-16`;
+    `Tr(H)=−1.904324 = −4πO` (contact identity) ✓. All four self-checks PASS.
+  - Correction logged: the t-quadrature (Gaussian transform) reproduces **H** (contact included),
+    not S — same as the FD route; both equal the closed-form H. S is then traceless(H).
 - ☐ **P1.2** Implement all 6 components for general angular momenta (reuse `rys_deriv.F90` /
   `grd2_rys.F90` or `comp_soc_int2_prim`).
 - ☐ **P1.3** L1 FD test: compare to finite differences of the ERI engine to 6–8 sig figs;
@@ -51,6 +65,15 @@ Z-vector / relaxed densities, response/relaxation terms, analytic gradients of D
 ---
 
 ## RUNNING LOG  (newest first — one short entry per `-p` run)
+- 2026-06-09 — **P1.1 done.** Decided **Path A** (SS 2e integral = Hessian of 1/r₁₂ → reuse ERI
+  engine). Derived the closed form for the (s,s,s,s) quartet and wrote a standalone prototype
+  `tests/ssc_prototype_ssss.py` triangulating it three independent ways: closed form (Boys F₁,F₂),
+  Richardson-FD of the Coulomb ERI (independent erf-based F₀), and a Boys-free Gaussian-transform
+  t-quadrature. Agreement: FD rel 2.3e-9, quad rel 9.9e-14; Tr(S)=−3.9e-16 (traceless);
+  Tr(H)=−4πO contact identity confirmed. Corrected an earlier misderivation (t-quadrature gives the
+  bare Hessian H, not the traceless S; S = traceless(H)). **L1 gate (P1.3) NOT cleared** — this
+  validates the math vs an analytic oracle, not vs OpenQP's ERI engine. Updated derivation .tex.
+  NEXT: P1.2 (native Fortran integral via Path A), then P1.3 (L1 gate vs the real ERI engine).
 - 2026-06-09 — Setup session. Context gathered from `./papers/` (Sinnecker–Neese 2006 eq 9,
   Neese 2007 eq 46 — prefactor discrepancy logged in `CLAUDE.md §3`; Pokhilko–Krylov 2019 W–E
   extraction; Neese JACS 2006 mean-field). Reuse map built. Scaffolding committed. No code yet.

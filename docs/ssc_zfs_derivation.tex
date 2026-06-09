@@ -69,9 +69,54 @@ by matching the O$_2$ benchmark. % TODO(L2): insert pinned C, sign, and the matc
 % TODO: Pokhilko-Krylov 2019; relate the M_S=S one-particle spin density to the single reduced
 % density (highest-spin generator); reuse of soc_mrsf compute_tdm.
 
-\section{Integral evaluation}
-% TODO: Path A (ERI engine + derivative kernel) vs Path B (direct Rys, comp_soc_int2_prim);
-% record which passed L1 and why.
+\section{Integral evaluation}\label{sec:integral}
+\textbf{Route decision (P1.1): Path A.} The two-electron SS integral is the Hessian of $1/r_{12}$
+w.r.t.\ the interelectronic vector, so it is computed with the existing ERI machinery rather than a
+bespoke Rys primitive. As a distribution,
+\begin{equation}
+\partial_k\partial_l\frac{1}{r} = \frac{3r_kr_l-\delta_{kl}r^2}{r^5} - \frac{4\pi}{3}\,\delta_{kl}\,\delta^3(\mathbf r),
+\label{eq:dist}
+\end{equation}
+i.e.\ the physical traceless dipolar kernel $T_{kl}=(3r_kr_l-\delta_{kl}r^2)/r^5$ is the
+\emph{traceless part} of the bare Hessian; the isotropic contact term does not enter the ZFS
+$\mathbf D$-tensor (which is traceless by construction) and is removed.
+
+\paragraph{Closed form for the $(ss|ss)$ quartet.} For unnormalized primitive $s$-Gaussians at
+$A,B$ (electron~1, exponents $a,b$) and $C,D$ (electron~2, exponents $c,d$), with the usual
+charge-cloud reductions $p=a+b$, $q=c+d$, $P=(aA+bB)/p$, $Q=(cC+dD)/q$, $\rho=pq/(p+q)$,
+$R=P-Q$, $T=\rho|R|^2$, $K=e^{-ab|A-B|^2/p}e^{-cd|C-D|^2/q}$, and
+$\mathrm{pref}=2\pi^{5/2}/(pq\sqrt{p+q})$, the bare-Hessian integral is
+\begin{equation}
+H_{kl} = \mathrm{pref}\,K\,\Big[\,4\rho^2 R_k R_l\,F_2(T) - 2\rho\,\delta_{kl}\,F_1(T)\,\Big],
+\label{eq:Hclosed}
+\end{equation}
+($F_n$ the Boys functions), obtained as $H_{kl}=\partial^2 J/\partial d_k\partial d_l|_{d=0}$ from
+the operator-displaced Coulomb integral $J(\mathbf d)=\mathrm{pref}\,K\,F_0(\rho|R-\mathbf d|^2)$.
+The physical SS integral is its traceless part,
+\begin{equation}
+S_{kl} = H_{kl} - \tfrac13\,\mathrm{Tr}(H)\,\delta_{kl} = H_{kl} + \tfrac{4\pi}{3}\,\delta_{kl}\,O,
+\qquad O=\langle\rho_1|\rho_2\rangle = K\Big(\tfrac{\pi}{p+q}\Big)^{3/2}e^{-T},
+\label{eq:Sclosed}
+\end{equation}
+consistent with Eq.~\eqref{eq:dist}: $\mathrm{Tr}(H)=-4\pi O$, exactly cancelled by the contact term.
+
+\paragraph{Numerical validation (P1.1 prototype, \texttt{tests/ssc\_prototype\_ssss.py}).} The
+closed form \eqref{eq:Hclosed}--\eqref{eq:Sclosed} is triangulated against two independent oracles
+for a non-degenerate $(ss|ss)$ quartet:
+\begin{enumerate}
+  \item \textbf{Richardson finite differences} of the Coulomb ERI $J(\mathbf d)$ (using only an
+        erf-based $F_0$, independent of the $F_1,F_2$ in \eqref{eq:Hclosed}) $\to$ reproduces $H$.
+  \item \textbf{Boys-free Gaussian-transform $t$-quadrature}, $1/r=\frac{2}{\sqrt\pi}\int_0^\infty
+        e^{-t^2r^2}dt$, integrated by Gauss--Legendre $\to$ also reproduces $H$ (the contact term is
+        captured once the operator is smeared against the clouds; the $t$-quadrature gives the
+        \emph{bare} Hessian, \emph{not} the traceless $S$).
+\end{enumerate}
+Agreement: closed-form $H$ vs FD-of-ERI rel.\ $2.3\times10^{-9}$; closed-form $H$ vs $t$-quadrature
+rel.\ $9.9\times10^{-14}$; $\mathrm{Tr}(S)=-3.9\times10^{-16}$; and the contact identity
+$\mathrm{Tr}(H)=-4\pi O=-1.904324$ confirmed. \textbf{This validates the closed form against an
+analytic oracle only; it is NOT the L1 stage gate} (P1.3), which checks the native Fortran integral
+against OpenQP's own ERI engine and is still pending. General angular momenta (P1.2) reuse
+\texttt{rys\_deriv.F90}/\texttt{grd2\_rys.F90}.
 
 \section{Assumptions log}
 % TODO: every non-obvious choice (reference determinant RO/UNO, mean-field factorization for
@@ -79,6 +124,11 @@ by matching the O$_2$ benchmark. % TODO(L2): insert pinned C, sign, and the matc
 \begin{itemize}
   \item Reference determinant: RO/UNO-type density preferred (UKS overestimates $D^{SS}$;
         ROKS$\approx$UNO -- Neese 2007 \S E). UMRSF exposes a density-source flag.
+  \item Integral route: \textbf{Path A} (ERI engine $+$ Hessian-of-$1/r_{12}$ kernel), since the
+        SS integral \emph{is} that Hessian (Eq.~\eqref{eq:dist}); no new Rys primitive required
+        for validation. The physical kernel is the \emph{traceless part} of the bare Hessian;
+        the contact term (Eq.~\eqref{eq:dist}) is dropped as it cannot contribute to a traceless
+        $\mathbf D$. Validated numerically in P1.1 (\S\ref{sec:integral}); L1 gate (P1.3) pending.
   \item (add as the project proceeds)
 \end{itemize}
 
