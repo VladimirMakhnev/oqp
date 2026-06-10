@@ -121,12 +121,15 @@
   fetch triplet Davidson vectors → `compute_tdm` → take state density in MO → `C P C^T` → bfnrm-scale
   → contract → diagonalise. Requires `runtype=soc` (or otherwise) so BOTH singlet+triplet manifolds
   are populated (an energy-only MRSF run left `bvec_mo_s` unset → `compute_tdm` crashed).
-- **KEY FINDING (the "watch it" point):** the naive choice `P = t11ab(I,I)` (SOC triplet–triplet
-  M_S=±1 αβ TDM, diagonal) is **trace 0** → it is NOT the M_S=S state spin density; it is the
-  *reduced spin-tensor* density (a transition object). H₂O MRSF triplet with it gives D^SS≈0.
-  The correct M_S=S=1 spin density is a **Wigner–Eckart combination** of the spin-tensor components
-  `t110aa` (M_S=0, αα) and `t11ab` (M_S=±1, αβ) (Pokhilko–Krylov), normalised so Tr(P^(α−β))=2M_S=2.
-  This derivation must be done carefully before any MRSF D^SS is trusted. **NOT yet done.**
+- **Wigner–Eckart M_S=S extraction — DERIVED & VALIDATED (2026-06-10).** The naive `t11ab(I,I)` is
+  trace-0 (a transition object); the correct M_S=+1 spin density is built directly from the unrelaxed
+  amplitudes. With X = reordered triplet Davidson vector (nocca×nvirb), the unrelaxed difference
+  blocks `tij = −X Xᵀ` (α-hole, occ) and `tab = Xᵀ X` (particle, vir) (as in `sfropcal`), the M_S=+1
+  spin density is **`P^(α−β)_{+1} = SOMO + tij + tab`** (α→α excitation; β unchanged). Implemented in
+  `compute_ssc_dtensor_mrsf` (uses only `bvec_mo_t`; no `compute_tdm`/`bvec_s`). **3 anchors pass:**
+  (1) `Tr(P^(α−β)) = 2.000000` (H₂O & O₂); (2) H₂O MRSF triplet **D^SS = +1.067 cm⁻¹** (nonzero,
+  sensible, vs ~0 for t11ab); (3) **O₂ T1 (≈single det): MRSF 1.4995 vs ROKS-ref 1.5203 cm⁻¹ (1.4%)**
+  — links the MRSF path to the validated RO path. (Needs `runtype=soc` so `bvec_mo_t` is populated.)
 - **RO-reference acene anchor (works now, NOT full MRSF):** the benchmark **RO-DFT column** (benzene
   0.159, naphthalene 0.052, anthracene 0.042, tetracene 0.031) is essentially the ROHF/ROKS-reference
   level, which the *existing* contraction handles directly via the triplet-ROHF `DM_A−DM_B`. Benzene

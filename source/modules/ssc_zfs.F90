@@ -363,16 +363,27 @@ contains
 !===============================================================================
 
 !> Build the M_S=S=1 spin density of MRSF triplet state `istate` (Wigner-Eckart highest-spin
-!> component, reusing the SOC-MRSF M_S=+/-1 alpha-beta TDM t11ab(I,I); unrelaxed, no Z-vector),
-!> transform MO->AO, and contract -> 6 raw (C=1) D-tensor components. `spincheck` returns
-!> Tr(P_MO) (= 2 M_S if the TDM carries the state-spin-density normalisation); `nt` returns the
-!> number of MRSF triplet states found.
+!> component) directly from the unrelaxed MRSF amplitudes, transform MO->AO, and contract -> 6 raw
+!> (C=1) D-tensor components. `spincheck` returns Tr(P^(a-b)_MO) (must be 2 = 2 M_S); `nt` = number
+!> of MRSF triplet states.
+!>
+!> DERIVATION (Wigner-Eckart / Pokhilko-Krylov; validated by the 3 anchors below).
+!>   Let X(i+,a-) be the reordered triplet Davidson vector of state `istate`
+!>   (i+ = alpha-occupied 1..nocca, a- = beta-virtual nocb+1..nbf), reshaped to X(nocca, nvirb).
+!>   Unrelaxed difference density blocks (as in the MRSF gradient/z-vector, sfropcal):
+!>     tij(i,j) = - sum_a X(i,a) X(j,a)     (alpha-hole, occ-occ, Tr = -|X|^2)
+!>     tab(a,b) = + sum_i X(i,a) X(i,b)     (particle,  vir-vir, Tr = +|X|^2)
+!>   For the M_S=+1 component both unpaired electrons are alpha and the excitation is alpha->alpha,
+!>   so the spin density is the (M_S=+1) reference SOMO density PLUS both difference blocks:
+!>     P^(a-b)_{+1} = SOMO(iO1,iO2)  +  tij(occ)  +  tab(vir)
+!>   Trace = 2 + (-|X|^2) + (+|X|^2) = 2 = 2 M_S  (anchor 1), and in the single-determinant limit
+!>   (X -> 0) it reduces to the reference SOMO density = ROHF (DM_A - DM_B) (anchor 3). No Z-vector
+!>   (relaxed) contribution is included (out of scope). Uses only the triplet vectors (no bvec_s).
   subroutine compute_ssc_dtensor_mrsf(infos, istate, dcomp, spincheck, nt)
     use types,             only: information
     use basis_tools,       only: basis_set
-    use soc_mrsf_mod,      only: compute_tdm
     use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A, &
-         OQP_td_bvec_mo_s, OQP_td_bvec_mo_t, OQP_td_singlet_energies, OQP_td_triplet_energies
+         OQP_td_bvec_mo_t, OQP_td_triplet_energies
 
     type(information), target, intent(inout) :: infos
     integer,  intent(in)  :: istate
@@ -380,42 +391,73 @@ contains
     integer,  intent(out) :: nt
 
     type(basis_set), pointer :: basis
-    real(dp), contiguous, pointer :: bvec_s(:,:), bvec_t(:,:), mo_a(:,:)
-    real(dp), contiguous, pointer :: se(:), te(:)
-    real(dp), allocatable :: t00aa(:,:,:,:), t110aa(:,:,:,:), t11ab(:,:,:,:)
+    real(dp), contiguous, pointer :: bvec_t(:,:), mo_a(:,:), te(:)
+    real(dp), allocatable :: xt(:), xmat(:,:), tij(:,:), tab(:,:)
     real(dp), allocatable :: pmo(:,:), tmp(:,:), pao(:,:), q(:,:)
-    integer :: nbf, nocca, noccb, ns, i, j
+    integer :: nbf, nocca, noccb, nvirb, iO1, iO2, i, j, a, b
+    integer :: ijLR1, ijLR2, ijG, ijD
 
     basis => infos%basis
     basis%atoms => infos%atoms
     nbf   = basis%nbf
     nocca = infos%mol_prop%nelec_a
     noccb = infos%mol_prop%nelec_b
+    nvirb = nbf - noccb
+    iO1   = nocca - 1
+    iO2   = nocca
 
-    call tagarray_get_data(infos%dat, OQP_td_bvec_mo_s, bvec_s)
     call tagarray_get_data(infos%dat, OQP_td_bvec_mo_t, bvec_t)
     call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
-    call tagarray_get_data(infos%dat, OQP_td_singlet_energies, se)
     call tagarray_get_data(infos%dat, OQP_td_triplet_energies, te)
-    ns = size(se); nt = size(te)
+    nt = size(te)
 
-    allocate(t00aa(ns,nt,nbf,nbf), t110aa(nt,nt,nbf,nbf), t11ab(nt,nt,nbf,nbf))
-    call compute_tdm(bvec_s, bvec_t, nocca, noccb, nbf, ns, nt, t00aa, t110aa, t11ab)
+    ! Reorder the triplet Davidson vector exactly as compute_tdm does (LR configuration handling)
+    allocate(xt(nocca*nvirb), xmat(nocca, nvirb))
+    xt = bvec_t(:, istate)
+    ijLR1 = (iO1 - noccb - 1)*nocca + iO1
+    ijLR2 = (iO2 - noccb - 1)*nocca + iO2
+    ijG   = (iO1 - noccb - 1)*nocca + iO2
+    ijD   = (iO2 - noccb - 1)*nocca + iO1
+    xt(ijLR2) = bvec_t(ijLR1, istate)
+    xt(ijG)   = 0.0_dp
+    xt(ijD)   = 0.0_dp
+    do a = 1, nvirb
+      do i = 1, nocca
+        xmat(i,a) = xt((a-1)*nocca + i)
+      end do
+    end do
 
-    ! M_S=+1 (alpha-beta) one-particle spin density of triplet `istate`, MO basis
+    ! tij = -X X^T  (nocca x nocca);  tab = X^T X  (nvirb x nvirb)
+    allocate(tij(nocca,nocca), tab(nvirb,nvirb))
+    call dgemm('n','t', nocca,nocca,nvirb, -1.0_dp, xmat,nocca, xmat,nocca, 0.0_dp, tij,nocca)
+    call dgemm('t','n', nvirb,nvirb,nocca, +1.0_dp, xmat,nocca, xmat,nocca, 0.0_dp, tab,nvirb)
+
+    ! M_S=+1 spin density in MO basis:  SOMO + tij(occ) + tab(vir-beta)
     allocate(pmo(nbf,nbf), tmp(nbf,nbf), pao(nbf,nbf), q(nbf,nbf))
-    pmo = t11ab(istate, istate, :, :)
+    pmo = 0.0_dp
+    pmo(iO1,iO1) = pmo(iO1,iO1) + 1.0_dp
+    pmo(iO2,iO2) = pmo(iO2,iO2) + 1.0_dp
+    do j = 1, nocca
+      do i = 1, nocca
+        pmo(i,j) = pmo(i,j) + tij(i,j)
+      end do
+    end do
+    do b = 1, nvirb
+      do a = 1, nvirb
+        pmo(noccb+a, noccb+b) = pmo(noccb+a, noccb+b) + tab(a,b)
+      end do
+    end do
+
     spincheck = 0.0_dp
     do i = 1, nbf
       spincheck = spincheck + pmo(i,i)
     end do
-    pmo = 0.5_dp*(pmo + transpose(pmo))                 ! symmetrise (state density is symmetric)
+    pmo = 0.5_dp*(pmo + transpose(pmo))                 ! symmetrise
 
     ! AO spin density  P_AO = C P_MO C^T   (mo_a columns are MOs, normalised-AO basis)
     call dgemm('n','n', nbf,nbf,nbf, 1.0_dp, mo_a, nbf, pmo, nbf, 0.0_dp, tmp, nbf)
     call dgemm('n','t', nbf,nbf,nbf, 1.0_dp, tmp, nbf, mo_a, nbf, 0.0_dp, pao, nbf)
 
-    ! bfnrm pre-scaling (same convention as the ROHF path), then contract
     do j = 1, nbf
       do i = 1, nbf
         q(i,j) = pao(i,j) * basis%bfnrm(i) * basis%bfnrm(j)
