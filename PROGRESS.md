@@ -130,10 +130,13 @@
 - **RO-reference acene anchor (works now, NOT full MRSF):** the benchmark **RO-DFT column** (benzene
   0.159, naphthalene 0.052, anthracene 0.042, tetracene 0.031) is essentially the ROHF/ROKS-reference
   level, which the *existing* contraction handles directly via the triplet-ROHF `DM_A−DM_B`. Benzene
-  T1 (ROHF/6-31G*, stability=false): spin density correctly in the π system (pz≈1.64). D^SS = [run].
-  This validates the contraction on an acene; the MRSF *correlation* refinement is the part blocked
-  on the correct M_S=S extraction above. **Performance note:** the contraction is O(nshell⁴) with no
-  screening — slow for benzene, prohibitive for larger acenes; needs screening/symmetry before L3.
+  T1 (ROHF/6-31G*, stability=false): spin density correctly in the π system (pz≈1.64); **D^SS =
+  +0.069 cm⁻¹**, near-axial (E/D=0.06), **unique axis ⟂ ring** (correct). Order-of-magnitude vs the
+  reference 0.159 (RO-DFT/exp) — factor ~2, as expected for RO-**HF**/6-31G* vs ROBP/EPR-III (and the
+  known RO underestimation). Validates the contraction on an acene; the MRSF *correlation* refinement
+  is the part blocked on the correct M_S=S extraction above. **Performance note:** the contraction is
+  O(nshell⁴) with no screening — ~minutes for benzene (~48 shells), prohibitive for larger acenes;
+  needs Schwarz screening / permutational symmetry before the L3 acene series is practical.
 
 ## PHASE 3 — L3 task list (validation = magnitudes/trends, NOT exact; O2 stays the anchor)
 - ☐ **P3.1** Feed MRSF `P^(α−β)` (M_S = S via Wigner–Eckart, reuse `compute_tdm`) into the L2
