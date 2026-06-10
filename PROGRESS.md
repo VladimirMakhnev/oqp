@@ -130,6 +130,20 @@
   (1) `Tr(P^(α−β)) = 2.000000` (H₂O & O₂); (2) H₂O MRSF triplet **D^SS = +1.067 cm⁻¹** (nonzero,
   sensible, vs ~0 for t11ab); (3) **O₂ T1 (≈single det): MRSF 1.4995 vs ROKS-ref 1.5203 cm⁻¹ (1.4%)**
   — links the MRSF path to the validated RO path. (Needs `runtype=soc` so `bvec_mo_t` is populated.)
+- **FIRST benzene MRSF D^SS (2026-06-10) — REVEALS the construction is still incomplete. STOP.**
+  Benzene/6-31G*/bhhlyp, MRSF T1 (istate=1): `Tr(P)=2.000000`, but **D^SS = −0.110 cm⁻¹ with the
+  unique axis IN-PLANE and E/D=0.26** — vs the ROKS reference (same run) **+0.078 cm⁻¹, axis ⟂ ring,
+  E/D=0.04** (correct), and experiment **+0.159 (axis ⟂ ring)**. The magnitude moved up
+  (0.078→0.110, toward 0.159) but the **sign flipped and the axis rotated into the plane**, which is
+  **unphysical** for the non-degenerate ³B1u T1. **Diagnosis:** `P=SOMO+tij+tab` is correct only in
+  the near-single-determinant limit (O₂: tij+tab small → matched RO to 1.4%); for a genuinely
+  multireference MRSF state (benzene: tij+tab is O(1), |X|²~1) the **spin-flip → M_S=+1 Wigner–Eckart
+  bookkeeping is more subtle** than reinterpreting the α→β amplitude as α→α. The O₂/H₂O anchors
+  (trace, near-single-det, nonzero) were necessary but **not sufficient** — the benzene physics
+  (sign + ⟂-ring axis) is the discriminating test. **The M_S=+1 construction must be re-derived**
+  (proper spin-adapted M_S=+1 density / Pokhilko–Krylov reduced spin density) before any MRSF acene
+  number is trusted. Anchor going forward: MRSF benzene must give D>0 with axis ⟂ ring, magnitude
+  above the RO baseline toward 0.159.
 - **RO-reference acene anchor (works now, NOT full MRSF):** the benchmark **RO-DFT column** (benzene
   0.159, naphthalene 0.052, anthracene 0.042, tetracene 0.031) is essentially the ROHF/ROKS-reference
   level, which the *existing* contraction handles directly via the triplet-ROHF `DM_A−DM_B`. Benzene
