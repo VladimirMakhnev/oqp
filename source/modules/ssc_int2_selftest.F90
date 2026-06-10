@@ -58,6 +58,7 @@ contains
     real(dp) :: href_kl, rel, trc, scale
     real(dp) :: worst_rel, worst_trace, worst_an, worst_ref, worst_scale
     real(dp) :: worst_rel_sig                ! worst rel diff over non-negligible (scale>1e-9) blocks
+    real(dp) :: norm_qgauss = 0, norm_textbook = 0, norm_ratio = 0   ! absolute-normalisation check
     integer  :: worst_q(4), worst_comp, worst_q_sig(4)
     logical  :: signif
     integer  :: ntested, npass, nfail_alls, nfail_iandj
@@ -213,6 +214,43 @@ contains
 
     ok = (worst_rel <= 1.0e-6_dp) .and. (ntested > 0)
 
+    ! ---- absolute-normalisation check: 2-centre (ss|ss) ERI vs textbook ----
+    ! Compares comp_eri2_prim_disp(0) to dij_fac * 2*pi^(5/2)/(p q sqrt(p+q)) * F0(rho|P-Q|^2).
+    ! (L1 only validated the integral as a ratio; this pins the absolute scale.)
+    block
+      use boys, only: boysf
+      integer :: sA, sB, sh2
+      type(shell_t) :: sa_sh, sb_sh
+      real(dp), allocatable :: eri(:,:)
+      real(dp) :: pp, qq, rho2, t, ft(0:2), pref, textbook, x
+      sA = 0; sB = 0
+      do sh2 = 1, nshell
+        if (basis%am(sh2) == 0 .and. basis%ex(basis%g_offset(sh2)) < 1.0e2_dp) then
+          if (sA == 0) then
+            sA = sh2
+          else if (basis%origin(sh2) /= basis%origin(sA)) then
+            sB = sh2; exit
+          end if
+        end if
+      end do
+      if (sA > 0 .and. sB > 0) then
+        call sa_sh%fetch_by_id(basis, sA)
+        call sb_sh%fetch_by_id(basis, sB)
+        call cpij%shell_pair(basis, sa_sh, sa_sh, tol, dup=.false.)
+        call cpkl%shell_pair(basis, sb_sh, sb_sh, tol, dup=.false.)
+        allocate(eri(1,1))
+        call comp_eri2_prim_disp(cpij, 1, cpkl, 1, [0._dp,0._dp,0._dp], eri)
+        pp = cpij%p(1)%aa; qq = cpkl%p(1)%aa
+        rho2 = pp*qq/(pp+qq)
+        x = rho2 * sum((cpij%p(1)%r - cpkl%p(1)%r)**2)
+        call boysf(2, x, ft)
+        pref = 2.0_dp * (4.0_dp*atan(1.0_dp))**2.5_dp / (pp*qq*sqrt(pp+qq))
+        textbook = cpij%p(1)%expfac * cpkl%p(1)%expfac * pref * ft(0)
+        norm_qgauss = eri(1,1); norm_textbook = textbook
+        norm_ratio = eri(1,1)/textbook
+      end if
+    end block
+
     open(newunit=u, file="/tmp/ssc_int2_selftest.out", status="replace", &
          action="write", iostat=ios)
     if (ios == 0) then
@@ -265,6 +303,8 @@ contains
       write(unit,'(A,ES12.4,A,4I4)') ' worst rel diff, non-negligible : ', worst_rel_sig, &
         '   at quartet ', worst_q_sig
       write(unit,'(A,ES12.4)')  ' worst |Tr(S)| (traceless inv.) : ', worst_trace
+      write(unit,'(A,3ES15.7)') ' 2c (ss|ss) qgauss/textbook/ratio: ', &
+        norm_qgauss, norm_textbook, norm_ratio
       write(unit,'(A,ES10.2)')    ' FD base step last quartet (h) : ', h
       write(unit,'(A)')           ' (adaptive h=min(0.02,0.1/sqrt(rho)); 3-level Richardson h,h/2,h/4)'
       if (ok) then

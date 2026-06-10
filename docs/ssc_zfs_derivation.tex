@@ -58,12 +58,48 @@ Neese 2007, Eq.~(1) (operator) & (see text) & $(\delta r^2-3rr)$ & --- \\
 \end{tabular}
 \end{center}
 Eqs.~(9) and (46) share the kernel sign and density grouping yet differ in $C$ by a factor
-$-1/4$; Eq.~(1) flips the kernel sign. \textbf{Resolution (to be filled at gate L2):} adopt the
-algebraic \emph{form} of Eq.~\eqref{eq:working}; determine the numerical $C$ (magnitude and sign)
-by matching the O$_2$ benchmark. % TODO(L2): insert pinned C, sign, and the match table.
+$-1/4$; Eq.~(1) flips the kernel sign.
 
-\section{Units}
-% TODO: a.u. -> cm^{-1} conversion; role of g_e and alpha; document the exact factor used.
+\paragraph{Resolution (pinned at gate L2, 2026-06-10).} We adopt the algebraic \emph{form} of
+Eq.~\eqref{eq:working} and the traceless kernel, and fix $C$ \emph{numerically} on the
+O$_2\,{}^3\Sigma_g^-$ benchmark ($r=1.207$\,\AA, ROHF/6-31G$^*$, single-determinant where
+McWeeny--Mizuno is exact). The raw contraction ($C=1$) gives an axial tensor with principal values
+$(+0.1711,+0.1711,-0.3422)$\,a.u.\ and $D_\mathrm{au}=\tfrac32 D_{zz}=-0.5132$\,a.u. Converting with
+$D^{SS}=C\,D_\mathrm{au}\,(\mathrm{Ha}\!\to\!\mathrm{cm}^{-1})$, $\mathrm{Ha}\!\to\!\mathrm{cm}^{-1}=219474.63$:
+\begin{itemize}
+  \item Sinnecker--Neese Eq.~(9), $C=+g_e^2\alpha^2/[4S(2S-1)]$: $D^{SS}=-6.01$\,cm$^{-1}$
+        (wrong sign, $4\times$ too large) --- \emph{rejected}.
+  \item Neese 2007 Eq.~(46), $C=-g_e^2\alpha^2/[16S(2S-1)]$: $\boxed{D^{SS}=+1.503\ \mathrm{cm}^{-1}}$,
+        inside the reference band $1.44$--$1.6$\,cm$^{-1}$, correct (positive) sign.
+\end{itemize}
+The numerically pinned prefactor matches \textbf{Eq.~(46)} to $1.1\%$ ($C_\mathrm{pin}/C_{46}=+1.011$;
+the residual is method/basis: ROHF/6-31G$^*$ vs.\ the $\sim$1.52 reference). The Eq.~(9)$\to$Eq.~(46)
+ratio is exactly $-1/4$, i.e.\ \textbf{the discrepancy of \S\ref{sec:conv} is resolved in favour of
+Eq.~(46)} by the experiment; it is a genuine convention difference, not a code factor (verified: the
+integral absolute normalisation was independently checked against the textbook $(ss|ss)$ ERI,
+ratio $1.0000000$). For $S=1$, $4S(2S-1)=4$ and $16S(2S-1)=16$.
+
+\paragraph{Reference-state caveat.} The symmetric $^3\Sigma_g^-$ ROHF determinant
+$(\pi_{gx}^*)^1(\pi_{gy}^*)^1$ (cylindrical spin density, $p_x{=}p_y$) is a stability saddle; SCF
+stability-following escapes to a symmetry-broken, non-axial solution. The benchmark requires the
+symmetric state (\texttt{scf.stability=false}); only then is the McWeeny--Mizuno reference correct
+and the $\mathbf{D}$-tensor axial.
+
+\section{Units}\label{sec:units}
+The raw AO contraction yields the $\mathbf{D}$-tensor in atomic units with $C=1$. The physical value
+is $D^{SS}_{kl}=C\,D^{(\mathrm{raw})}_{kl}\,(\mathrm{Ha}\!\to\!\mathrm{cm}^{-1})$ with
+$C=-g_e^2\alpha^2/[16\,S(2S-1)]$ (Eq.~46, \S\ref{sec:conv}), $g_e=2.0023193$, $\alpha=1/137.035999$
+(fine-structure constant, a.u.), $\mathrm{Ha}\!\to\!\mathrm{cm}^{-1}=219474.6314$. The scalar ZFS
+parameters follow from the principal values $\lambda_x,\lambda_y,\lambda_z$ (ordered
+$|\lambda_z|\ge|\lambda_y|\ge|\lambda_x|$): $D=\lambda_z-\tfrac12(\lambda_x+\lambda_y)$,
+$E=\tfrac12(\lambda_x-\lambda_y)$, with $0\le E/D\le \tfrac13$. (For $S=1$: $16\,S(2S-1)=16$.)
+
+\paragraph{Implementation notes / bugs fixed at L2.} Two defects were found and fixed while pinning
+$C$: (i) the Rys $(ss|ss)$ prefactor inherited from the (untested, caller-less) \texttt{QGaussRys2e}
+carried a spurious $e^{-|P-Q|^2}$ factor that mis-normalised multi-centre integrals (caught by a
+direct textbook-ERI check; one-centre integrals, hence L1, were insensitive); (ii) an off-by-one AO
+index (1-based \texttt{ao\_offset}) in the density contraction. After both fixes the N\,${}^4S$ atom
+(spherical spin density) gives $\mathbf{D}=0$ to machine precision and O$_2$ is axial, as required.
 
 \section{Spin density at $M_S=S$ (Wigner--Eckart)}
 % TODO: Pokhilko-Krylov 2019; relate the M_S=S one-particle spin density to the single reduced
@@ -139,7 +175,7 @@ Updated as gates clear (value vs reference vs tolerance, pass/fail).
 \toprule
 system & computed & reference & tol. & gate \\
 \midrule
-O$_2$\,$^3\Sigma_g^-$ (1.207\,\AA) & --- & $1.44$--$1.6$\,cm$^{-1}$ & few\,\% & L2 \\
+O$_2$\,$^3\Sigma_g^-$ (1.207\,\AA) & $+1.503$ & $1.44$--$1.6$\,cm$^{-1}$ & few\,\% & \textbf{L2 ok} \\
 benzene & --- & $0.1593$\,cm$^{-1}$ & RMSD$\sim$0.0035 & L3 \\
 naphthalene & --- & $0.1004$ & & L3 \\
 anthracene & --- & $0.0702$ & & L3 \\

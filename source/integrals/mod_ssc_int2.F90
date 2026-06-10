@@ -69,7 +69,7 @@ contains
     integer      :: maxij, maxkl, maxp1, maxp, nrow, ncol
     real(real64) :: f00, aandb, rho, expe
     real(real64) :: b00, b10, bp01, c10, cp01, cp10, c01
-    real(real64) :: c00(3), cp00(3), dij(3), dkl(3), pq(3), pq0(3)
+    real(real64) :: c00(3), cp00(3), dij(3), dkl(3), pq(3)
     real(real64), allocatable :: g(:,:,:)
 
     associate ( ppij => cpij%p(idij), ppkl => cpkl%p(idkl), &
@@ -78,13 +78,9 @@ contains
 
     aandb = ppij%aa + ppkl%aa
     rho   = ppij%aa * ppkl%aa / aandb
-    ! Operator displacement (e2 shifted by dshift) must enter ONLY the Boys argument (interelectronic
-    ! separation). The `expe` prefactor carries an exp(-x/rho) Gaussian in |P-Q| that belongs to the
-    ! fixed orbital geometry; letting dshift leak into it corrupts the displaced ERI (adds a spurious
-    ! second-derivative term). So evaluate the Boys roots at the displaced separation, but build the
-    ! prefactor from the undisplaced one.
-    pq0   = ppij%r - ppkl%r                      ! undisplaced (fixed geometry)
-    pq    = pq0 - dshift                         ! displaced separation (operator)
+    ! Operator displacement: shift the interelectronic separation by dshift (only the Boys argument
+    ! and the VRR centres depend on it; the prefactor `expe` is constant -- see below).
+    pq    = (ppij%r - ppkl%r) - dshift
     ryscomp%x = rho * SUM(pq**2)
     call ryscomp%evaluate()
 
@@ -99,7 +95,13 @@ contains
 
     dij = cpij%ri - cpij%rj        ! A - B
     dkl = cpkl%ri - cpkl%rj        ! C - D
-    expe = PI252 / (ppij%aa * ppkl%aa * SQRT(aandb)) * EXP(-rho * SUM(pq0**2) / rho)
+    ! Prefactor 2*pi^(5/2)/(p q sqrt(p+q)). NOTE: the parent QGaussRys2e (untested 2e-SOC path,
+    ! no production callers) multiplied this by exp(-x/rho) = exp(-|P-Q|^2); with the standard Rys
+    ! weights (sum_t w_t = F0) that factor is SPURIOUS and shrinks multi-centre ERIs by exp(-|P-Q|^2)
+    ! (verified: 2-centre (ss|ss) vs textbook -> ratio 1 only without it). The charge-cloud overlap
+    ! K_AB K_CD lives in dij_fac (expfac); the only |P-Q| dependence belongs in the Boys F0. So no
+    ! exp() here. (One-centre x=0 is unaffected, hence L1 was insensitive to this.)
+    expe = PI252 / (ppij%aa * ppkl%aa * SQRT(aandb))
 
     do t = 1, ryscomp%nroots
       g = 0.0_real64

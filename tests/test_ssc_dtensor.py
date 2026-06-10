@@ -19,6 +19,9 @@ from pathlib import Path
 SELFTEST_OUT = Path("/tmp/ssc_dtensor_selftest.out")
 
 # O2 3Sigma_g- at r(O-O) = 1.207 A, ROHF triplet, polarized (d-containing) basis.
+# stability=false KEEPS the symmetric (cylindrical) 3Sigma_g- DIIS solution: the symmetric ROHF
+# point is a saddle, and OQP's stability-following otherwise escapes to a symmetry-broken (non-axial)
+# solution. The symmetric state is the McWeeny-Mizuno reference and gives the axial D-tensor.
 INPUT = """[input]
 system=
    8   0.000000000   0.000000000   0.000000000
@@ -32,6 +35,7 @@ type=huckel
 [scf]
 multiplicity=3
 type=rohf
+stability=false
 """
 
 
@@ -67,6 +71,17 @@ class TestSSCDTensorContraction(unittest.TestCase):
         result = SELFTEST_OUT.read_text()
         self.assertIn("SSC_DTENSOR_SELFTEST PASS", result,
                       "SS D-tensor contraction failed the traceless invariant:\n" + result)
+
+        # L2: O2 3Sigma_g- SS D-tensor with the pinned prefactor (Neese 2007 Eq. 46) must be axial
+        # (E/D = 0) and land in the benchmarks.md band D^SS = +1.44..1.6 cm^-1, positive.
+        import re
+        m = re.search(r"D\^SS\s*=\s*([-\d.]+)\s*cm\^-1\s*E\^SS\s*=\s*([-\d.]+)", result)
+        self.assertIsNotNone(m, "could not parse D^SS / E^SS from:\n" + result)
+        dval, eval_ = float(m.group(1)), float(m.group(2))
+        self.assertTrue(1.40 <= dval <= 1.65,
+                        f"O2 D^SS = {dval} cm^-1 outside benchmark band 1.44-1.6:\n{result}")
+        self.assertAlmostEqual(eval_, 0.0, places=3,
+                               msg=f"O2 must be axial (E=0), got E^SS={eval_}:\n{result}")
 
 
 if __name__ == "__main__":

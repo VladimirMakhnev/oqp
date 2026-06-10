@@ -7,17 +7,17 @@
 ## CURRENT STATUS
 
 - **Branch:** `ssc-zfs` (off `SSC` @ baseline 222/225 tests passing).
-- **Phase:** 1 — L1 integral implemented (P1.2 done). P1.3 self-test PASSES in testing; the L1
-  **stage gate is NOT yet declared** — awaiting human confirmation (per session instruction).
-- **Gate cleared:** **L1 ☑ (s,p,d; human-confirmed for s,p 2026-06-09; d extended same day).**
-- **P2.1 built** (SS→D-tensor AO contraction; runs, traceless). **STOPPED before L2** per instruction.
-- **NEXT STEP:** L2 — (i) get a clean O₂ ³Σ_g⁻ ROHF reference (axial D about z; see P2.1 flag),
-  (ii) P2.2 diagonalise → D,E and a.u.→cm⁻¹, (iii) **pin `C`/sign numerically** on `D^SS≈1.44–1.6
-  cm⁻¹`. Do NOT trust the raw P2.1 magnitude until then.
-- **NEXT STEP:** await confirmation of L1. On confirmation, mark L1 ☑ and begin **Phase 2 / P2.1**
-  (the `{P_μν P_κτ − P_μκ P_ντ}` contraction + ROHF; then pin `C` on O₂ at L2). Possible follow-up
-  before L2: extend the SS integral / FD self-test to **d shells** (currently s,p validated;
-  spherical-harmonic d deferred).
+- **Phase:** 2 — **L2 achieved in testing** (O₂ pin lands in band; awaiting human confirmation).
+- **Gate cleared:** **L1 ☑ (s,p,d).**  **L2 — PASSES in testing (O₂ D^SS = +1.503 cm⁻¹), gate not
+  declared pending confirmation** (per session instruction "report and STOP after the O₂ pin").
+- **L2 RESULT (O₂ ³Σ_g⁻, r=1.207 Å, ROHF/6-31G*, stability=false):** axial **Dxx=Dyy=+0.1711,
+  Dzz=−0.3422** a.u. (E/D=0); **D^SS = +1.5031 cm⁻¹** (target +1.44–1.6, positive ✓). **Pinned
+  prefactor C = −g_e²α²/[16 S(2S−1)] = Neese 2007 Eq. 46**, matched numerically to **1.1%**
+  (`C_pin/C_Eq46 = +1.011`). The Sinnecker–Neese Eq. 9 prefactor (+g_e²α²/[4S(2S−1)]) gives
+  −6.01 cm⁻¹ (wrong sign, 4× too large) — it differs from the pinned C by exactly **−1/4**, the
+  inter-paper discrepancy flagged in CLAUDE.md §3. **Convention resolved: use Eq. 46.**
+- **NEXT STEP:** await L2 confirmation. Then (per CLAUDE.md): secondary L2 check CH₂ ³B₁
+  ([CONFIRM] the reference first), then **Phase 3 / L3** (MRSF densities; Wigner–Eckart M_S=S).
 
 ---
 
@@ -95,9 +95,17 @@
     state** (plain Huckel→ROHF need not give the cylindrically-symmetric ³Σ_g⁻ π* occupation); it is
     an L2 concern (right state + `C`/unit pin), NOT a contraction bug (the 6 integral components are
     L1-validated vs FD; Tr(D)=0 holds). Resolve at L2 before trusting the magnitude.
-- ☐ **P2.2** Assemble the 6-component D-tensor; diagonalise → `D`, `E`, `E/D`; unit a.u.→cm⁻¹.
-- ☐ **P2.3** **Pin `C` and sign NUMERICALLY on O₂ ³Σ_g⁻ @ 1.207 Å** (target `D^SS ≈ 1.44–1.6
-  cm⁻¹`). Record pinned value + match in the LaTeX doc. Cross-check CH₂ ³B₁. **Gate L2.**
+- ☑ **P2.2** Diagonalise the 6-component D-tensor → principal values, `D`, `E`, `E/D`, a.u.→cm⁻¹.
+  Symmetric-3×3 Jacobi (`jacobi3`) + ZFS ordering (`order_zfs`) in `ssc_zfs.F90`; report prints
+  `D^SS`, `E^SS` (cm⁻¹) and `E/D`. O₂: principal values (+0.1711,+0.1711,−0.3422) a.u., E/D=0.
+- ◐ **P2.3 / Gate L2 — PASSES in testing (O₂); not declared pending confirmation.**
+  **Pinned `C = −g_e²α²/[16 S(2S−1)]` (Neese 2007, Eq. 46)**, baked into `ssc_zfs.F90`.
+  O₂ ³Σ_g⁻ @ 1.207 Å, ROHF/6-31G* (stability=false): **D^SS = +1.5031 cm⁻¹** (band +1.44–1.6 ✓,
+  sign + ✓), E/D=0. `C_pin/C_Eq46 = +1.011` (1.1%, within "few %"). Convention discrepancy
+  (CLAUDE.md §3) **resolved**: Eq. 46, not Eq. 9 (which is off by −1/4 → −6.01 cm⁻¹).
+  **Two bugs found+fixed reaching this** (see RUNNING LOG): a spurious `exp(−|P−Q|²)` ERI-prefactor
+  factor (multi-centre normalisation) and an off-by-one AO index in the contraction. **Secondary
+  CH₂ ³B₁ check still TODO** (confirm its `D^SS` reference first — benchmarks.md [CONFIRM]).
 
 ## PHASE 3 — L3: MRSF densities  (gate: §7 L3)  — DO NOT START before L2 passes
 - ☐ **P3.1** Feed MRSF `P^(α−β)` (M_S = S via Wigner–Eckart, reuse `compute_tdm`) into the L2
@@ -111,6 +119,18 @@ Z-vector / relaxed densities, response/relaxation terms, analytic gradients of D
 ---
 
 ## RUNNING LOG  (newest first — one short entry per `-p` run)
+- 2026-06-10 — **L2 pinned on O₂ (PASSES in testing; stopped after the pin).** Got the clean
+  cylindrical ³Σ_g⁻ reference via **`scf.stability=false`** (the symmetric ROHF point is a saddle;
+  OQP's stability-following otherwise escapes to a symmetry-broken non-axial state). Diagnosing the
+  initial non-axiality uncovered **two real bugs**, both fixed: (1) an **off-by-one AO index** in the
+  contraction (`mu=locao+i` → `locao+i-1`; `locao` is 1-based) which scrambled px/py/pz of the
+  density — fixing it gave axial D and N⁴S→0; (2) a **spurious `exp(−|P−Q|²)`** factor in the Rys
+  `expe` prefactor (copied from the untested, caller-less `QGaussRys2e`) that mis-normalised
+  multi-centre ERIs — verified by a new textbook-ERI check (ratio 0.041→**1.0000000** after removal;
+  L1 unaffected since one-centre x=0). Added P2.2 diagonalisation (`jacobi3`). **Result: O₂ D^SS =
+  +1.5031 cm⁻¹** (band +1.44–1.6), E/D=0; **pinned C = Neese 2007 Eq. 46** to 1.1%; Eq. 9 off by
+  −1/4 (CLAUDE.md §3 resolved). All SSC tests pass (L1 87846/87846; L2 O₂; prototype). STOP after
+  the pin per instruction; await confirmation. NEXT: CH₂ ³B₁ secondary check, then L3 (MRSF).
 - 2026-06-09 — **P2.1 contraction built (stopped before L2).** Implemented `source/modules/ssc_zfs.F90`
   (`compute_ssc_dtensor_raw` + `ssc_dtensor_selftest`): contracts the L1-validated SS integral with
   the ROHF spin density `DM_A−DM_B` (Coulomb − exchange), bfnrm absorbed via density pre-scaling.
