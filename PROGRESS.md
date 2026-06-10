@@ -7,9 +7,10 @@
 ## CURRENT STATUS
 
 - **Branch:** `ssc-zfs` (off `SSC` @ baseline 222/225 tests passing).
-- **Phase:** 2 — **L2 achieved in testing** (O₂ pin lands in band; awaiting human confirmation).
-- **Gate cleared:** **L1 ☑ (s,p,d).**  **L2 — PASSES in testing (O₂ D^SS = +1.503 cm⁻¹), gate not
-  declared pending confirmation** (per session instruction "report and STOP after the O₂ pin").
+- **Phase:** 3 — entering L3 (MRSF densities). **L1 ☑, L2 ☑ both human-confirmed.**
+- **Gate cleared:** **L1 ☑ (s,p,d).  L2 ☑ (O₂ D^SS = +1.503 cm⁻¹, C = Neese 2007 Eq. 46;
+  human-confirmed 2026-06-10).** L1 gate now also enforces the absolute textbook-(ss|ss)-ERI
+  normalisation check (ratio = 1.0; guards the `exp(−|P−Q|²)` regression class).
 - **L2 RESULT (O₂ ³Σ_g⁻, r=1.207 Å, ROHF/6-31G*, stability=false):** axial **Dxx=Dyy=+0.1711,
   Dzz=−0.3422** a.u. (E/D=0); **D^SS = +1.5031 cm⁻¹** (target +1.44–1.6, positive ✓). **Pinned
   prefactor C = −g_e²α²/[16 S(2S−1)] = Neese 2007 Eq. 46**, matched numerically to **1.1%**
@@ -104,8 +105,12 @@
   sign + ✓), E/D=0. `C_pin/C_Eq46 = +1.011` (1.1%, within "few %"). Convention discrepancy
   (CLAUDE.md §3) **resolved**: Eq. 46, not Eq. 9 (which is off by −1/4 → −6.01 cm⁻¹).
   **Two bugs found+fixed reaching this** (see RUNNING LOG): a spurious `exp(−|P−Q|²)` ERI-prefactor
-  factor (multi-centre normalisation) and an off-by-one AO index in the contraction. **Secondary
-  CH₂ ³B₁ check still TODO** (confirm its `D^SS` reference first — benchmarks.md [CONFIRM]).
+  factor (multi-centre normalisation) and an off-by-one AO index in the contraction.
+  - **Secondary CH₂ ³B₁ sanity (NOT a gate — reference is [CONFIRM]):** bent triplet, ROHF/6-31G*,
+    `D^SS = +0.693 cm⁻¹`, rhombic `|E/D| = 0.208` (in [0,1/3]). Positive, plausible magnitude
+    (below the ~0.76 experimental *total* D, consistent with SS being dominant for a 1st-row
+    carbene) and physically sensible rhombicity (in-plane a₁ + out-of-plane b₁). O₂ remains the
+    binding anchor.
 
 ## PHASE 3 — L3: MRSF densities  (gate: §7 L3)  — DO NOT START before L2 passes
 - ☐ **P3.1** Feed MRSF `P^(α−β)` (M_S = S via Wigner–Eckart, reuse `compute_tdm`) into the L2

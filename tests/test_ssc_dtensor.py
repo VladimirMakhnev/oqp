@@ -75,7 +75,7 @@ class TestSSCDTensorContraction(unittest.TestCase):
         # L2: O2 3Sigma_g- SS D-tensor with the pinned prefactor (Neese 2007 Eq. 46) must be axial
         # (E/D = 0) and land in the benchmarks.md band D^SS = +1.44..1.6 cm^-1, positive.
         import re
-        m = re.search(r"D\^SS\s*=\s*([-\d.]+)\s*cm\^-1\s*E\^SS\s*=\s*([-\d.]+)", result)
+        m = re.search(r"D\^SS\s*=\s*([-\d.]+)\s*cm\^-1\s*\|?E\^SS\|?\s*=\s*([-\d.]+)", result)
         self.assertIsNotNone(m, "could not parse D^SS / E^SS from:\n" + result)
         dval, eval_ = float(m.group(1)), float(m.group(2))
         self.assertTrue(1.40 <= dval <= 1.65,

@@ -59,6 +59,7 @@ contains
     real(dp) :: worst_rel, worst_trace, worst_an, worst_ref, worst_scale
     real(dp) :: worst_rel_sig                ! worst rel diff over non-negligible (scale>1e-9) blocks
     real(dp) :: norm_qgauss = 0, norm_textbook = 0, norm_ratio = 0   ! absolute-normalisation check
+    logical  :: norm_done = .false.
     integer  :: worst_q(4), worst_comp, worst_q_sig(4)
     logical  :: signif
     integer  :: ntested, npass, nfail_alls, nfail_iandj
@@ -118,6 +119,7 @@ contains
     worst_q = 0
     worst_an = 0.0_dp; worst_ref = 0.0_dp; worst_scale = 0.0_dp; worst_comp = 0
     worst_rel_sig = 0.0_dp; worst_q_sig = 0
+    norm_done = .false.; norm_ratio = 0.0_dp
     ntested = 0
     npass = 0
     nfail_alls = 0
@@ -212,11 +214,11 @@ contains
       end do
     end do
 
-    ok = (worst_rel <= 1.0e-6_dp) .and. (ntested > 0)
-
     ! ---- absolute-normalisation check: 2-centre (ss|ss) ERI vs textbook ----
     ! Compares comp_eri2_prim_disp(0) to dij_fac * 2*pi^(5/2)/(p q sqrt(p+q)) * F0(rho|P-Q|^2).
-    ! (L1 only validated the integral as a ratio; this pins the absolute scale.)
+    ! L1's FD-vs-own-ERI is self-consistent and was BLIND to a spurious exp(-|P-Q|^2) prefactor in
+    ! qgauss_ss (multi-centre normalisation, caught here and fixed); this absolute check is now part
+    ! of the L1 gate so that regression can never reappear.
     block
       use boys, only: boysf
       integer :: sA, sB, sh2
@@ -248,8 +250,13 @@ contains
         textbook = cpij%p(1)%expfac * cpkl%p(1)%expfac * pref * ft(0)
         norm_qgauss = eri(1,1); norm_textbook = textbook
         norm_ratio = eri(1,1)/textbook
+        norm_done = .true.
       end if
     end block
+
+    ! L1 gate: FD-vs-analytic to 1e-6 AND the absolute (ss|ss) normalisation = textbook to 1e-6.
+    ok = (worst_rel <= 1.0e-6_dp) .and. (ntested > 0) .and. norm_done &
+         .and. (abs(norm_ratio - 1.0_dp) <= 1.0e-6_dp)
 
     open(newunit=u, file="/tmp/ssc_int2_selftest.out", status="replace", &
          action="write", iostat=ios)

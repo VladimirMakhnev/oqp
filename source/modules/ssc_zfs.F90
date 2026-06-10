@@ -297,7 +297,7 @@ contains
     call jacobi3(dmat, ev, evec)
     call order_zfs(ev)                        ! |ev(3)| >= |ev(2)| >= |ev(1)|  (0 <= E/D <= 1/3)
     dval_au = ev(3) - 0.5_dp*(ev(1) + ev(2))
-    eval_au = 0.5_dp*(ev(2) - ev(1))
+    eval_au = 0.5_dp*abs(ev(1) - ev(2))       ! E >= 0 by convention -> 0 <= E/D <= 1/3
     dval_cm = cpref * dval_au * HA2WN
     eval_cm = cpref * eval_au * HA2WN
 
@@ -322,8 +322,8 @@ contains
       write(unit,'(A,3ES16.8)') '   ev = ', ev
       write(unit,'(A)') ' Pinned prefactor C = -g_e^2 alpha^2 / [16 S(2S-1)]  (Neese 2007, Eq. 46):'
       write(unit,'(A,ES16.8)') '   C (S=1)     = ', cpref
-      write(unit,'(A,F12.5,A,F12.5)') '   D^SS        = ', dval_cm, ' cm^-1     E^SS = ', eval_cm
-      write(unit,'(A,F8.4)') '   E/D         = ', merge(eval_au/dval_au, 0.0_dp, abs(dval_au)>0)
+      write(unit,'(A,F12.5,A,F12.5)') '   D^SS        = ', dval_cm, ' cm^-1     |E^SS| = ', abs(eval_cm)
+      write(unit,'(A,F8.4)') '   E/D         = ', merge(eval_au/abs(dval_au), 0.0_dp, abs(dval_au)>0)
       write(unit,'(A)') ' (O2 3Sigma_g- target D^SS = +1.44..1.6 cm^-1, axial E/D=0.)'
       if (abs(trc) <= 1.0e-8_dp*maxval(abs(d)) + 1.0e-12_dp) then
         write(unit,'(A)') ' SSC_DTENSOR_SELFTEST PASS (trace vanishes)'
