@@ -10,6 +10,7 @@ module soc_mrsf_mod
 
   private
   public soc_mrsf
+  public compute_tdm   ! reused by the SSC/ZFS module to build M_S=S triplet spin densities
 
 contains
 

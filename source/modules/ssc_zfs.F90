@@ -27,8 +27,10 @@ module ssc_zfs_mod
   use precision, only: dp
   implicit none
   private
-  public :: compute_ssc_dtensor_raw     ! 6 raw AO-contracted components (C = 1)
-  public :: ssc_dtensor_selftest        ! bind(C) harness: run + report invariants
+  public :: compute_ssc_dtensor_raw     ! 6 raw AO-contracted components (C = 1), ROHF DM_A-DM_B
+  public :: contract_ssc_dtensor        ! contraction given an external bfnrm-scaled spin density
+  public :: ssc_dtensor_selftest        ! bind(C) harness: ROHF (O2/CH2) D-tensor
+  public :: ssc_mrsf_dtensor_selftest   ! bind(C) harness: MRSF triplet D-tensor (L3)
 
   character(len=*), parameter :: module_name = "ssc_zfs_mod"
 
@@ -50,19 +52,11 @@ contains
     type(basis_set), pointer :: basis
     real(dp), contiguous, pointer :: dmat_a(:), dmat_b(:)
     real(dp), allocatable :: q(:,:)            ! bfnrm-scaled spin density (square)
-    real(dp), allocatable :: ssblk(:,:,:), acc(:,:,:)
-    type(shell_t)  :: shi, shj, shk, shl
-    type(shpair_t) :: cpij, cpkl
-    integer :: nbf, nshell, ii, jj, kk, ll, ig, kg
-    integer :: i, j, k, l, mu, nu, ka, ta, ij, kl, c
-    integer :: nij, nkl
-    real(dp) :: tol, w
+    integer :: nbf
 
     basis => infos%basis
     basis%atoms => infos%atoms
-    nbf    = basis%nbf
-    nshell = basis%nshell
-    tol    = huge(1.0_dp)
+    nbf = basis%nbf
 
     call tagarray_get_data(infos%dat, OQP_DM_A, dmat_a)
     call tagarray_get_data(infos%dat, OQP_DM_B, dmat_b)
@@ -70,8 +64,38 @@ contains
     ! square, bfnrm-scaled spin density  Q_munu = (P^a - P^b)_munu * bfnrm_mu * bfnrm_nu
     allocate(q(nbf, nbf))
     call build_scaled_spin_density(dmat_a, dmat_b, basis%bfnrm, nbf, q)
-
     call spin_population_diag(infos, dmat_a, dmat_b)
+
+    call contract_ssc_dtensor(infos, q, dcomp)
+  end subroutine compute_ssc_dtensor_raw
+
+!-------------------------------------------------------------------------------
+!> Quartet-loop contraction of the SS dipolar integral with a bfnrm-scaled spin density `q`
+!> (square, normalised-AO basis pre-scaled by bfnrm on both indices). Returns the 6 raw (C=1)
+!> components dxx,dyy,dzz,dxy,dxz,dyz. Shared by the ROHF (DM_A-DM_B) and MRSF density paths.
+  subroutine contract_ssc_dtensor(infos, q, dcomp)
+    use types,           only: information
+    use basis_tools,     only: basis_set
+    use mod_shell_tools, only: shell_t, shpair_t
+    use mod_ssc_int2,    only: comp_ssc_int2_prim
+
+    type(information), target, intent(inout) :: infos
+    real(dp), intent(in)  :: q(:,:)
+    real(dp), intent(out) :: dcomp(6)
+
+    type(basis_set), pointer :: basis
+    real(dp), allocatable :: ssblk(:,:,:), acc(:,:,:)
+    type(shell_t)  :: shi, shj, shk, shl
+    type(shpair_t) :: cpij, cpkl
+    integer :: nshell, ii, jj, kk, ll, ig, kg
+    integer :: i, j, k, l, mu, nu, ka, ta, ij, kl, c
+    integer :: nij, nkl
+    real(dp) :: tol, w
+
+    basis => infos%basis
+    basis%atoms => infos%atoms
+    nshell = basis%nshell
+    tol    = huge(1.0_dp)
 
     call cpij%alloc(basis)
     call cpkl%alloc(basis)
@@ -131,7 +155,7 @@ contains
         end do
       end do
     end do
-  end subroutine compute_ssc_dtensor_raw
+  end subroutine contract_ssc_dtensor
 
 !-------------------------------------------------------------------------------
 !> Diagnostic: gross spin population (DM_A-DM_B diagonal) grouped by cartesian direction, to check
@@ -333,5 +357,125 @@ contains
       write(unit,'(A/)') '========================================================'
     end subroutine report
   end subroutine ssc_dtensor_selftest
+
+!===============================================================================
+! L3 — MRSF triplet state: M_S=S spin density -> SS D-tensor
+!===============================================================================
+
+!> Build the M_S=S=1 spin density of MRSF triplet state `istate` (Wigner-Eckart highest-spin
+!> component, reusing the SOC-MRSF M_S=+/-1 alpha-beta TDM t11ab(I,I); unrelaxed, no Z-vector),
+!> transform MO->AO, and contract -> 6 raw (C=1) D-tensor components. `spincheck` returns
+!> Tr(P_MO) (= 2 M_S if the TDM carries the state-spin-density normalisation); `nt` returns the
+!> number of MRSF triplet states found.
+  subroutine compute_ssc_dtensor_mrsf(infos, istate, dcomp, spincheck, nt)
+    use types,             only: information
+    use basis_tools,       only: basis_set
+    use soc_mrsf_mod,      only: compute_tdm
+    use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A, &
+         OQP_td_bvec_mo_s, OQP_td_bvec_mo_t, OQP_td_singlet_energies, OQP_td_triplet_energies
+
+    type(information), target, intent(inout) :: infos
+    integer,  intent(in)  :: istate
+    real(dp), intent(out) :: dcomp(6), spincheck
+    integer,  intent(out) :: nt
+
+    type(basis_set), pointer :: basis
+    real(dp), contiguous, pointer :: bvec_s(:,:), bvec_t(:,:), mo_a(:,:)
+    real(dp), contiguous, pointer :: se(:), te(:)
+    real(dp), allocatable :: t00aa(:,:,:,:), t110aa(:,:,:,:), t11ab(:,:,:,:)
+    real(dp), allocatable :: pmo(:,:), tmp(:,:), pao(:,:), q(:,:)
+    integer :: nbf, nocca, noccb, ns, i, j
+
+    basis => infos%basis
+    basis%atoms => infos%atoms
+    nbf   = basis%nbf
+    nocca = infos%mol_prop%nelec_a
+    noccb = infos%mol_prop%nelec_b
+
+    call tagarray_get_data(infos%dat, OQP_td_bvec_mo_s, bvec_s)
+    call tagarray_get_data(infos%dat, OQP_td_bvec_mo_t, bvec_t)
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    call tagarray_get_data(infos%dat, OQP_td_singlet_energies, se)
+    call tagarray_get_data(infos%dat, OQP_td_triplet_energies, te)
+    ns = size(se); nt = size(te)
+
+    allocate(t00aa(ns,nt,nbf,nbf), t110aa(nt,nt,nbf,nbf), t11ab(nt,nt,nbf,nbf))
+    call compute_tdm(bvec_s, bvec_t, nocca, noccb, nbf, ns, nt, t00aa, t110aa, t11ab)
+
+    ! M_S=+1 (alpha-beta) one-particle spin density of triplet `istate`, MO basis
+    allocate(pmo(nbf,nbf), tmp(nbf,nbf), pao(nbf,nbf), q(nbf,nbf))
+    pmo = t11ab(istate, istate, :, :)
+    spincheck = 0.0_dp
+    do i = 1, nbf
+      spincheck = spincheck + pmo(i,i)
+    end do
+    pmo = 0.5_dp*(pmo + transpose(pmo))                 ! symmetrise (state density is symmetric)
+
+    ! AO spin density  P_AO = C P_MO C^T   (mo_a columns are MOs, normalised-AO basis)
+    call dgemm('n','n', nbf,nbf,nbf, 1.0_dp, mo_a, nbf, pmo, nbf, 0.0_dp, tmp, nbf)
+    call dgemm('n','t', nbf,nbf,nbf, 1.0_dp, tmp, nbf, mo_a, nbf, 0.0_dp, pao, nbf)
+
+    ! bfnrm pre-scaling (same convention as the ROHF path), then contract
+    do j = 1, nbf
+      do i = 1, nbf
+        q(i,j) = pao(i,j) * basis%bfnrm(i) * basis%bfnrm(j)
+      end do
+    end do
+    call contract_ssc_dtensor(infos, q, dcomp)
+  end subroutine compute_ssc_dtensor_mrsf
+
+!-------------------------------------------------------------------------------
+  subroutine ssc_mrsf_dtensor_selftest_C(c_handle) bind(C, name="ssc_mrsf_dtensor_selftest")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    inf => oqp_handle_get_info(c_handle)
+    call ssc_mrsf_dtensor_selftest(inf)
+  end subroutine ssc_mrsf_dtensor_selftest_C
+
+  subroutine ssc_mrsf_dtensor_selftest(infos)
+    use types,        only: information
+    use physical_constants, only: alpha => FINE_STRUCTURE
+    type(information), target, intent(inout) :: infos
+    real(dp) :: d(6), trc, spincheck, ev(3), evec(3,3), dmat(3,3)
+    real(dp) :: dval_au, eval_au, dval_cm, eval_cm, cpref
+    integer  :: u, ios, nt, istate
+    real(dp), parameter :: GE = 2.00231930436_dp, HA2WN = 219474.6313705_dp, S = 1.0_dp
+
+    istate = 1                                  ! lowest MRSF triplet
+    call compute_ssc_dtensor_mrsf(infos, istate, d, spincheck, nt)
+    trc = d(1) + d(2) + d(3)
+    cpref = - GE**2 * alpha**2 / (16.0_dp * S*(2.0_dp*S - 1.0_dp))
+
+    dmat = reshape([ d(1), d(4), d(5),  d(4), d(2), d(6),  d(5), d(6), d(3) ], [3,3])
+    call jacobi3(dmat, ev, evec)
+    call order_zfs(ev)
+    dval_au = ev(3) - 0.5_dp*(ev(1) + ev(2))
+    eval_au = 0.5_dp*abs(ev(1) - ev(2))
+    dval_cm = cpref * dval_au * HA2WN
+    eval_cm = cpref * eval_au * HA2WN
+
+    open(newunit=u, file="/tmp/ssc_mrsf_dtensor.out", status="replace", action="write", iostat=ios)
+    if (ios == 0) then ; call report(u) ; close(u) ; end if
+
+  contains
+    subroutine report(unit)
+      integer, intent(in) :: unit
+      write(unit,'(/A)') '============ SSC_MRSF_DTENSOR_SELFTEST (L3) ============'
+      write(unit,'(A,I0,A,I0)') ' MRSF triplet state istate = ', istate, '  of nt = ', nt
+      write(unit,'(A,F12.6,A)') ' M_S=S spin-density extraction: Tr(P_MO^(a-b)) = ', spincheck, &
+        '   (expect 2 = 2 M_S for the M_S=+1 component)'
+      write(unit,'(A)') ' Raw AO-contracted SS D-tensor (C=1, a.u.):'
+      write(unit,'(A,3ES15.7)') '   Dxx,Dyy,Dzz = ', d(1), d(2), d(3)
+      write(unit,'(A,3ES15.7)') '   Dxy,Dxz,Dyz = ', d(4), d(5), d(6)
+      write(unit,'(A,ES12.4)')  ' Tr(D) [~0] = ', trc
+      write(unit,'(A,3ES15.7)') ' principal values (a.u., C=1) = ', ev
+      write(unit,'(A,F12.5,A,F12.5)') ' D^SS = ', dval_cm, ' cm^-1   |E^SS| = ', abs(eval_cm)
+      write(unit,'(A,F8.4)') ' E/D = ', merge(eval_au/abs(dval_au), 0.0_dp, abs(dval_au)>0)
+      write(unit,'(A)') ' (L3 validation = magnitudes/trends vs DFT/CASSCF refs, NOT exact; O2 is the anchor.)'
+      write(unit,'(A/)') '========================================================'
+    end subroutine report
+  end subroutine ssc_mrsf_dtensor_selftest
 
 end module ssc_zfs_mod

@@ -112,7 +112,30 @@
     carbene) and physically sensible rhombicity (in-plane a₁ + out-of-plane b₁). O₂ remains the
     binding anchor.
 
-## PHASE 3 — L3: MRSF densities  (gate: §7 L3)  — DO NOT START before L2 passes
+## PHASE 3 — L3: MRSF densities  (gate: §7 L3)  — STOP for review before declaring (per instruction)
+
+### L3 status (2026-06-10) — machinery built; M_S=S extraction NOT yet correct. STOP for review.
+- **Built:** `compute_ssc_dtensor_mrsf` + `ssc_mrsf_dtensor_selftest` (`bind(C)`, `include/oqp.h`) in
+  `ssc_zfs.F90`; refactored the contraction into reusable `contract_ssc_dtensor(infos, q, dcomp)`
+  (ROHF and MRSF paths share it). Made `compute_tdm` public in `soc_mrsf_mod`. The MRSF path runs:
+  fetch triplet Davidson vectors → `compute_tdm` → take state density in MO → `C P C^T` → bfnrm-scale
+  → contract → diagonalise. Requires `runtype=soc` (or otherwise) so BOTH singlet+triplet manifolds
+  are populated (an energy-only MRSF run left `bvec_mo_s` unset → `compute_tdm` crashed).
+- **KEY FINDING (the "watch it" point):** the naive choice `P = t11ab(I,I)` (SOC triplet–triplet
+  M_S=±1 αβ TDM, diagonal) is **trace 0** → it is NOT the M_S=S state spin density; it is the
+  *reduced spin-tensor* density (a transition object). H₂O MRSF triplet with it gives D^SS≈0.
+  The correct M_S=S=1 spin density is a **Wigner–Eckart combination** of the spin-tensor components
+  `t110aa` (M_S=0, αα) and `t11ab` (M_S=±1, αβ) (Pokhilko–Krylov), normalised so Tr(P^(α−β))=2M_S=2.
+  This derivation must be done carefully before any MRSF D^SS is trusted. **NOT yet done.**
+- **RO-reference acene anchor (works now, NOT full MRSF):** the benchmark **RO-DFT column** (benzene
+  0.159, naphthalene 0.052, anthracene 0.042, tetracene 0.031) is essentially the ROHF/ROKS-reference
+  level, which the *existing* contraction handles directly via the triplet-ROHF `DM_A−DM_B`. Benzene
+  T1 (ROHF/6-31G*, stability=false): spin density correctly in the π system (pz≈1.64). D^SS = [run].
+  This validates the contraction on an acene; the MRSF *correlation* refinement is the part blocked
+  on the correct M_S=S extraction above. **Performance note:** the contraction is O(nshell⁴) with no
+  screening — slow for benzene, prohibitive for larger acenes; needs screening/symmetry before L3.
+
+## PHASE 3 — L3 task list (validation = magnitudes/trends, NOT exact; O2 stays the anchor)
 - ☐ **P3.1** Feed MRSF `P^(α−β)` (M_S = S via Wigner–Eckart, reuse `compute_tdm`) into the L2
   machinery. Add the UMRSF density-source flag (RO/UNO default).
 - ☐ **P3.2** Reproduce the acene/radical table; target RMSD ≈ 0.0035 cm⁻¹ (RO-type). **Gate L3.**
