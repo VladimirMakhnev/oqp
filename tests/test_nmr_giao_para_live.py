@@ -57,9 +57,13 @@ def _oqp_root():
 def _input(functional):
     fxc = f"functional={functional}\n" if functional else ""
     grid = "[dftgrid]\nrad_type=mhl\nrad_npts=99\nang_npts=302\n\n" if functional else ""
+    # trh_impl=otr: the post-SCF stability check is irrelevant to the GIAO
+    # validation, and the native TRAH solver crashes intermittently with a
+    # Fortran integer-overflow allocation error (observed on RHEL8/GCC 11.2,
+    # DFT cases); route it through OpenTrustRegion so the NMR call is reached.
     return (f"[input]\nsystem=\n{GEOM}\ncharge=0\nruntype=energy\n{fxc}"
             f"basis=sto-3g\nmethod=hf\n\n[guess]\ntype=huckel\n\n"
-            f"[scf]\nmultiplicity=1\ntype=rhf\n\n{grid}[properties]\nscf_prop=\n")
+            f"[scf]\nmultiplicity=1\ntype=rhf\ntrh_impl=otr\n\n{grid}[properties]\nscf_prop=\n")
 
 
 class GIAOParaShieldingTests(unittest.TestCase):

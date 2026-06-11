@@ -58,9 +58,12 @@ def _oqp_root():
 def _input(functional):
     fxc = f"functional={functional}\n" if functional else ""
     grid = "[dftgrid]\nrad_type=becke\n\n" if functional else ""
+    # trh_impl=otr: the native TRAH stability check crashes intermittently
+    # (Fortran integer-overflow allocation error, RHEL8/GCC 11.2) before the
+    # NMR property runs; it is irrelevant to the magnetic-response gates.
     return (f"[input]\nsystem=\n{GEOM}\ncharge=0\nruntype=energy\n{fxc}"
             f"basis=sto-3g\nmethod=hf\n\n[guess]\ntype=huckel\n\n"
-            f"[scf]\nmultiplicity=1\ntype=rhf\n\n{grid}"
+            f"[scf]\nmultiplicity=1\ntype=rhf\ntrh_impl=otr\n\n{grid}"
             f"[properties]\nscf_prop=nmr\n")
 
 

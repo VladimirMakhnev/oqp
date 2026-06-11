@@ -49,10 +49,14 @@ type=huckel
 [scf]
 multiplicity=1
 type=rhf
+trh_impl=otr
 
 [properties]
 scf_prop=nmr
 """
+# trh_impl=otr: the native TRAH stability check crashes intermittently
+# (Fortran integer-overflow allocation error, RHEL8/GCC 11.2) before the NMR
+# property runs; it is irrelevant to the shielding regression tested here.
 
 
 def _oqp_root():
