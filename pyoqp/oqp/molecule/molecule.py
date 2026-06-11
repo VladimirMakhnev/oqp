@@ -58,6 +58,7 @@ class Molecule:
         self.raman_mode_polarizability_derivatives = np.zeros((0, 3, 3))
         self.symmetry_metadata = {}
         self.mrsf_ekt_results_by_kind = {}
+        self.mrsf_nmr_by_state = {}
 
         self.tag = [
             'OQP::DM_A', 'OQP::DM_B',
@@ -1150,6 +1151,19 @@ class Molecule:
             'dyson_orbitals_mo': orbitals.tolist(),
         }
 
+    def snapshot_mrsf_nmr(self, state):
+        """Snapshot the MRSF state NMR shielding right after the native call.
+
+        The gradient loop reuses OQP::nmr_shielding_mrsf for every requested
+        state, so the per-state (natom, 32) blocks are collected here for the
+        final JSON (layout documented in tagarray_driver.F90).
+        """
+        try:
+            block = np.array(self.data['OQP::nmr_shielding_mrsf']).reshape(-1, 32)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return
+        self.mrsf_nmr_by_state[int(state)] = block.tolist()
+
     def snapshot_mrsf_ekt_results(self, kind):
         """Snapshot MRSF-EKT root results ('ip' or 'ea') right after the call.
 
@@ -1241,6 +1255,17 @@ class Molecule:
             data['nmr_shielding'] = sh.tolist()
         except (AttributeError, KeyError, TypeError, ValueError):
             pass
+
+        # save MRSF state-specific NMR shieldings if available (Gate 2
+        # prototype).  One (natom, 32) block per computed state, keyed by the
+        # state index (snapshots taken in the gradient loop because the
+        # native tag is overwritten per state); layout documented in
+        # tagarray_driver.F90 (OQP::nmr_shielding_mrsf).
+        if self.mrsf_nmr_by_state:
+            data['nmr_shielding_mrsf'] = {
+                str(state): block for state, block in
+                sorted(self.mrsf_nmr_by_state.items())
+            }
 
         # save gradients if available
         data['grad'] = np.array(self.get_grad()).tolist()

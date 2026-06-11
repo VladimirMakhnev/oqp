@@ -985,6 +985,36 @@ def _check_properties(config: dict[str, Any], report: CheckReport) -> None:
             action="Disable td_prop unless you have a confirmed downstream implementation.",
         )
 
+    nmr_mrsf = _get(config, "properties", "nmr_mrsf", False)
+    if nmr_mrsf:
+        # Pre-flight mirror of the Fortran guards in nmr_mrsf_shielding.F90:
+        # the prototype needs the MRSF Z-vector relaxed density of the target
+        # state, i.e. a gradient-type MRSF run on an ROHF triplet reference.
+        td_type = _as_lower(_get(config, "tdhf", "type", ""))
+        multiplicity = _get(config, "scf", "multiplicity", 1)
+        if runtype != "grad" or td_type != "mrsf" or scf_type != "rohf" \
+                or str(multiplicity) != "3":
+            report.add(
+                "ERROR",
+                "properties.nmr_mrsf",
+                "MRSF state NMR shielding requires runtype=grad, "
+                "tdhf.type=mrsf, scf.type=rohf, scf.multiplicity=3.",
+                value=f"runtype={runtype}, tdhf.type={td_type or '(unset)'}, "
+                      f"scf.type={scf_type}, multiplicity={multiplicity}",
+                action="Fix the run setup; there is deliberately no "
+                       "ground-state NMR fallback for nmr_mrsf.",
+            )
+        if "nmr" in scf_prop:
+            report.add(
+                "ERROR",
+                "properties.nmr_mrsf",
+                "Do not combine scf_prop=nmr (ground-state shielding) with "
+                "nmr_mrsf (state shielding) in one run.",
+                value="both requested",
+                action="Request the ground-state and MRSF state shieldings "
+                       "in separate runs to keep their outputs unambiguous.",
+            )
+
     if runtype != "grad":
         return
 

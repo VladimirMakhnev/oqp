@@ -7,6 +7,9 @@ module nmr_giao_shielding_mod
 
   private
   public nmr_giao_shielding_debug
+  ! Building blocks reused by the MRSF-NMR prototype (nmr_mrsf_shielding.F90):
+  ! the spin-channel GIAO CPHF/PSO pipeline and the ROHF semicanonicalization.
+  public giao_para_channel, semicanon_orbitals
 
 contains
 

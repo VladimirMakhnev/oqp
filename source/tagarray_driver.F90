@@ -38,6 +38,12 @@ module oqp_tagarray_driver
   character(len=*), parameter, public :: OQP_nmr_shielding_comment = &
     "Isotropic NMR shielding per atom (ppm); shape (5, natom): rows = "// &
     "dia, para_uncoupled, para_coupled, total_uncoupled, total_coupled"
+  character(len=*), parameter, public :: OQP_nmr_shielding_mrsf = OQP_prefix // "nmr_shielding_mrsf"
+  character(len=*), parameter, public :: OQP_nmr_shielding_mrsf_comment = &
+    "MRSF state NMR shielding per atom (ppm); shape (32, natom): 1-9 dia tensor "// &
+    "sigma(t,s) at (s-1)*3+t [exact state dia], 10-18 para_uncoupled tensor, "// &
+    "19-27 para_coupled tensor [both frozen-reference approx, Gate 2 prototype], "// &
+    "28-32 iso: dia, para_unc, para_cpl, total_unc, total_cpl"
   character(len=*), parameter, public :: OQP_mrsf_ekt_density_mo = OQP_prefix // "mrsf_ekt_density_mo"
   character(len=*), parameter, public :: OQP_mrsf_ekt_lagrangian_mo = OQP_prefix // "mrsf_ekt_lagrangian_mo"
   character(len=*), parameter, public :: OQP_mrsf_ekt_fock_mo = OQP_prefix // "mrsf_ekt_fock_mo"

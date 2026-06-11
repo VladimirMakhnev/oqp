@@ -189,6 +189,10 @@ OQP_CONFIG_SCHEMA = {
         # implementation and benchmarks are complete.
         'nmr_gauge': {'type': string, 'default': 'cgo'},
         'td_prop': {'type': bool, 'default': 'False'},
+        # MRSF state-specific NMR shielding (Gate 2 prototype): exact state
+        # diamagnetic + frozen-reference paramagnetic.  Requires runtype=grad,
+        # tdhf.type=mrsf, scf.type=rohf (the MRSF Z-vector relaxed density).
+        'nmr_mrsf': {'type': bool, 'default': 'False'},
         'grad': {'type': iarray, 'default': '0'},
         'nac': {'type': str, 'default': ''},
         'export': {'type': bool, 'default': 'False'},

@@ -769,6 +769,7 @@ class Gradient(Calculator):
         self.natom = mol.data["natom"]
         self.nstate = mol.config['tdhf']['nstate']
         self.td_prop = mol.config['properties']['td_prop']
+        self.nmr_mrsf = mol.config['properties']['nmr_mrsf']
 
         self.zvec_func = {
             'rpa': oqp.tdhf_z_vector,
@@ -844,6 +845,20 @@ class Gradient(Calculator):
             if self.td_prop == True:
                 oqp.electric_moments_excited(self.mol)
                 oqp.mulliken_excited(self.mol)
+
+            # MRSF state-specific NMR shielding (Gate 2 prototype): uses the
+            # relaxed density OQP::td_p of THIS target state, so it must run
+            # here, after the converged Z-vector and before the next state
+            # overwrites td_p.  The Fortran side hard-aborts on any non-MRSF
+            # reference instead of falling back to ground-state NMR.
+            if self.nmr_mrsf:
+                if self.td != 'mrsf':
+                    raise NotImplementedError(
+                        'properties.nmr_mrsf requires tdhf.type=mrsf '
+                        f'(got {self.td!r}); no ground-state NMR fallback.'
+                    )
+                oqp.nmr_mrsf_shielding(self.mol)
+                self.mol.snapshot_mrsf_nmr(i)
 
             self.grad_func[self.td](self.mol)
             grad = self.mol.get_grad().reshape((self.natom, 3))
