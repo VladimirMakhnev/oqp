@@ -1118,7 +1118,10 @@ def _check_runtype(config: dict[str, Any], report: CheckReport,
     # which exist for UMRSF yet. Reject them here at the single choke point
     # so validation fails early instead of dying at runtime.
     td_type = _as_lower(_get(config, "tdhf", "type", "rpa"))
-    if method == "tdhf" and td_type == "umrsf" and runtype != "energy":
+    _umrsf_grad_dev = os.environ.get("OQP_UMRSF_GRAD_DEV", "").lower() in (
+        "1", "true", "yes", "on")
+    if (method == "tdhf" and td_type == "umrsf" and runtype != "energy"
+            and not _umrsf_grad_dev):
         report.add(
             "ERROR",
             "tdhf.type",

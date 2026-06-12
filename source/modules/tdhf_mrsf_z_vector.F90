@@ -793,8 +793,23 @@ contains
     type(oqp_handle_t) :: c_handle
     type(information), pointer :: inf
     inf => oqp_handle_get_info(c_handle)
+    ! The plain MRSF entry point must never run the UMRSF path.
+    inf%tddft%umrsf = .false.
     call tdhf_mrsf_z_vector(inf)
   end subroutine tdhf_mrsf_z_vector_C
+
+  subroutine tdhf_umrsf_z_vector_C(c_handle) bind(C, name="tdhf_umrsf_z_vector")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    logical :: previous_umrsf
+    inf => oqp_handle_get_info(c_handle)
+    previous_umrsf = inf%tddft%umrsf
+    inf%tddft%umrsf = .true.
+    call tdhf_mrsf_z_vector(inf)
+    inf%tddft%umrsf = previous_umrsf
+  end subroutine tdhf_umrsf_z_vector_C
 
   subroutine tdhf_mrsf_z_vector(infos)
     use precision, only: dp
@@ -884,6 +899,7 @@ contains
     character(len=10) :: solver_name
 
     logical :: dft, mrsf_zvector_breakdown
+    logical :: umrsf = .false., uhfref = .false.
     integer :: scf_type, mol_mult, target_state
 
     ! tagarray
@@ -903,8 +919,10 @@ contains
             'MRSF-TDDFT are available for ROHF/UHF ref.&
             &with ONLY triplet multiplicity(mult=3)', with_abort)
 
+    umrsf = infos%tddft%umrsf
     scf_type = infos%control%scftype
-    if (scf_type==3) roref = .true.
+    roref = (.not. umrsf) .and. scf_type==3
+    uhfref = umrsf .and. scf_type==2
 
     dft = infos%control%hamilton == 20
     mrsf_zvector_breakdown = .false.
@@ -914,6 +932,19 @@ contains
     open (unit=iw, file=infos%log_filename, position="append")
   !
     call print_module_info('MRSF_TDHF_Z_Vector','Solving Z-Vector for MRSF-TDDFT')
+
+    if (umrsf .and. scf_type/=2) then
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector requires a UHF reference (scf type=uhf)'
+      call show_message('UMRSF-TDDFT Z-vector requires a UHF reference (scf type=uhf)', with_abort)
+    end if
+
+    ! Phase-1 guard: the UMRSF Z-vector machinery is added in later phases
+    ! (unrelaxed/RHS, closed-form multipliers, 4-block CPKS, P/W assembly).
+    if (umrsf) then
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector is under development and not yet functional'
+      call flush(iw)
+      call show_message('UMRSF-TDDFT Z-vector is under development and not yet functional', with_abort)
+    end if
 
   ! Readings
 

@@ -32,8 +32,23 @@ contains
     type(oqp_handle_t) :: c_handle
     type(information), pointer :: inf
     inf => oqp_handle_get_info(c_handle)
+    ! The plain MRSF entry point must never run the UMRSF path.
+    inf%tddft%umrsf = .false.
     call tdhf_mrsf_gradient(inf)
   end subroutine tdhf_mrsf_gradient_c
+
+  subroutine tdhf_umrsf_gradient_C(c_handle) bind(C, name="tdhf_umrsf_gradient")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    logical :: previous_umrsf
+    inf => oqp_handle_get_info(c_handle)
+    previous_umrsf = inf%tddft%umrsf
+    inf%tddft%umrsf = .true.
+    call tdhf_mrsf_gradient(inf)
+    inf%tddft%umrsf = previous_umrsf
+  end subroutine tdhf_umrsf_gradient_C
 
   subroutine tdhf_mrsf_gradient(infos)
     use io_constants, only: iw
@@ -65,6 +80,7 @@ contains
     integer :: nbf, nbf2
     integer :: mrst
     logical :: roref = .false.
+    logical :: umrsf = .false.
 
     type(dft_grid_t) :: molGrid
 
@@ -86,8 +102,9 @@ contains
             'MRSF-TDDFT are available for ROHF/UHF ref.&
             &with ONLY triplet multiplicity(mult=3)', with_abort)
 
+    umrsf = infos%tddft%umrsf
     scf_type = infos%control%scftype
-    if (scf_type==3) roref = .true.
+    roref = (.not. umrsf) .and. scf_type==3
 
     dft = infos%control%hamilton == 20
 
@@ -95,6 +112,13 @@ contains
     open (unit=iw, file=infos%log_filename, position="append")
   !
     call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT')
+
+    ! Phase-1 guard: UMRSF gradient assembly is added in later phases.
+    if (umrsf) then
+      write(iw,'(/x,a)') 'UMRSF-TDDFT gradient is under development and not yet functional'
+      call flush(iw)
+      call show_message('UMRSF-TDDFT gradient is under development and not yet functional', with_abort)
+    end if
 !
     write(iw,'(/5X,"Gradient options"/&
                 &5X,18("-")/&

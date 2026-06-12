@@ -243,7 +243,9 @@ void tdhf_umrsf_energy(struct oqp_handle_t *inf);
 void tdhf_mrsf_ekt_ip(struct oqp_handle_t *inf);
 void tdhf_mrsf_ekt_ea(struct oqp_handle_t *inf);
 void tdhf_mrsf_z_vector(struct oqp_handle_t *inf);
+void tdhf_umrsf_z_vector(struct oqp_handle_t *inf);
 void tdhf_mrsf_gradient(struct oqp_handle_t *inf);
+void tdhf_umrsf_gradient(struct oqp_handle_t *inf);
 
 void electric_moments(struct oqp_handle_t *inf);
 void electric_moments_excited(struct oqp_handle_t *inf);
