@@ -1200,6 +1200,9 @@ contains
     real(kind=dp), allocatable :: &
       rhs(:), lhs(:), xminv(:), xk(:), pk(:), errv(:), &
       hxa(:,:), hxb(:,:), tij(:,:), ppija(:,:), ppijb(:,:), tab(:,:)
+  ! UMRSF data kept between the RHS build and the P/W assembly:
+  ! fold matrices and the full-MO H+[T] transforms
+    real(kind=dp), allocatable :: ha_u(:,:), hb_u(:,:), hpt_a(:,:), hpt_b(:,:)
     real(kind=dp), allocatable, target :: pa(:,:,:)
     integer :: nsocc, lzdim, xvec_dim
 
@@ -1525,11 +1528,12 @@ contains
     ! ======================================================================
     if (umrsf) then
       ! Store the coupled multipliers (the within-class blocks are already
-      ! in the tags) and verify the solution residual (test 4.T2); the P/W
-      ! assembly is enabled in phase 5.
+      ! in the tags) and verify the solution residual (test 4.T2).
       call finish_umrsf_zvector()
-      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: solved; multipliers stored (development).'
-      write(iw,'(x,a)')  'Relaxed density/W assembly and gradient are not yet enabled; stopping here.'
+      ! Relaxed density P = T + Z and the energy-weighted W (Eqs. 96-99).
+      call build_umrsf_p_and_w()
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: multipliers, P and W assembled (development).'
+      write(iw,'(x,a)')  'The gradient module is enabled in phase 6.'
       call flush(iw)
       call int2_driver%clean()
       if (dft) call dftclean(infos)
@@ -1968,6 +1972,185 @@ contains
 
     end subroutine finish_umrsf_zvector
 
+    !> Phase 5: relaxed density P^sigma = T^sigma + Z^sigma (all blocks) and
+    !> the energy-weighted W^sigma (theory document Eqs. 96-99).
+    !>
+    !> Q-table entries: Q^sigma_tu = 2H_tu + 2F_tu[X,X] + [t in occ] H+[T];
+    !> W (pair value, p<q): W_pq = Q_pq + eps_q Z_pq + [p in occ] H+_pq[Z],
+    !> diagonal W_tt = (Q_tt + [t in occ] H+_tt[Z])/2.  The S-derivative
+    !> cofactor is (1/2) C W_full C^T per spin (W are pair multipliers, same
+    !> 1/2 bookkeeping as Z).  The equivalence of the two W forms on the
+    !> coupled blocks is the solved Z equation and is printed as a
+    !> consistency check (test 5.T2).
+    subroutine build_umrsf_p_and_w()
+
+      real(kind=dp), allocatable :: qa(:,:), qb(:,:), hza(:,:), hzb(:,:), &
+        wmo(:,:), pmo(:,:), xv(:,:), scr(:,:)
+      integer :: p, q, ok_u
+      real(kind=dp) :: tra, trb, dev_w
+
+      allocate(qa(nbf,nbf), qb(nbf,nbf), hza(nbf,nbf), hzb(nbf,nbf), &
+               wmo(nbf,nbf), pmo(nbf,nbf), xv(nbf,nbf), scr(nbf,nbf), &
+               source=0.0_dp, stat=ok_u)
+      if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
+
+    ! H+[Z_total] (trivial + coupled blocks, 1/2 pair-density convention)
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  0.5_dp, mo_a, nbf, &
+                          z_al, nbf, &
+                  0.0_dp, scr, nbf)
+      call dgemm('n','t',nbf,nbf,nbf, &
+                  1.0_dp, scr, nbf, &
+                          mo_a, nbf, &
+                  0.0_dp, pa(:,:,1), nbf)
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  0.5_dp, mo_b, nbf, &
+                          z_be, nbf, &
+                  0.0_dp, scr, nbf)
+      call dgemm('n','t',nbf,nbf,nbf, &
+                  1.0_dp, scr, nbf, &
+                          mo_b, nbf, &
+                  0.0_dp, pa(:,:,2), nbf)
+
+      if (allocated(int2_data)) call int2_data%clean()
+      int2_data = int2_tdgrd_data_t( &
+          d2 = pa, &
+          int_apb = .true., &
+          int_amb = .false., &
+          tamm_dancoff = .false., &
+          scale_exchange = scale_exch)
+      call int2_driver%run(int2_data, &
+              cam=dft.and.infos%dft%cam_flag, &
+              alpha=infos%dft%cam_alpha, &
+              beta=infos%dft%cam_beta,&
+              mu=infos%dft%cam_mu)
+      ab1 => int2_data%apb(:,:,:,1)
+      pa = pa*2
+      call utddft_fxc( &
+          basis = basis, &
+          molGrid = molGrid, &
+          isVecs = .true., &
+          wfa = mo_a, &
+          wfb = mo_b, &
+          fxa = ab1(:,:,1:1), &
+          fxb = ab1(:,:,2:2), &
+          dxa = pa(:,:,1:1), &
+          dxb = pa(:,:,2:2), &
+          nmtx = 1, &
+          threshold = 1.0d-15, &
+          infos = infos)
+      call orthogonal_transform('n', nbf, mo_a, ab1(:,:,1), hza, scr)
+      call orthogonal_transform('n', nbf, mo_b, ab1(:,:,2), hzb, scr)
+
+    ! Q-table: Q = 2H + 2F[X,X] + occupancy-gated H+[T]
+    ! F[X,X]: fxxa = -(X Fb X^T), fxxb = +(X^T Fa X), zero outside the
+    ! amplitude index ranges by construction
+      call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
+      qa = 2.0_dp*ha_u
+      qb = 2.0_dp*hb_u
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  1.0_dp, xv, nbf, &
+                          fb, nbf, &
+                  0.0_dp, scr, nbf)
+      call dgemm('n','t',nbf,nbf,nbf, &
+                 -2.0_dp, scr, nbf, &
+                          xv, nbf, &
+                  1.0_dp, qa, nbf)
+      call dgemm('t','n',nbf,nbf,nbf, &
+                  1.0_dp, xv, nbf, &
+                          fa, nbf, &
+                  0.0_dp, scr, nbf)
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  2.0_dp, scr, nbf, &
+                          xv, nbf, &
+                  1.0_dp, qb, nbf)
+      qa(1:nocca,:) = qa(1:nocca,:) + hpt_a(1:nocca,:)
+      qb(1:noccb,:) = qb(1:noccb,:) + hpt_b(1:noccb,:)
+
+    ! Consistency (5.T2): both W forms on the coupled blocks agree iff the
+    ! Z equations are solved: max |(Q_pq + eps_q Z + H+_pq[Z]) - (Q_qp + eps_p Z)|
+      dev_w = 0.0_dp
+      do q = nocca+1, nbf
+        do p = 1, nocca
+          dev_w = max(dev_w, abs(qa(p,q) + fa(q,q)*z_al(p,q) + hza(p,q) &
+                                - qa(q,p) - fa(p,p)*z_al(p,q)))
+        end do
+      end do
+      do q = noccb+1, nbf
+        do p = 1, noccb
+          dev_w = max(dev_w, abs(qb(p,q) + fb(q,q)*z_be(p,q) + hzb(p,q) &
+                                - qb(q,p) - fb(p,p)*z_be(p,q)))
+        end do
+      end do
+      write(iw,'(5x,a,1p,e12.4)') &
+        'W-form equivalence on coupled blocks (solver residual level) =', dev_w
+
+    ! W^alpha (pair values; the AO S-cofactor carries the 1/2)
+      do q = 1, nbf
+        do p = 1, q-1
+          wmo(p,q) = qa(p,q) + fa(q,q)*z_al(p,q)
+          if (p <= nocca) wmo(p,q) = wmo(p,q) + hza(p,q)
+          wmo(q,p) = wmo(p,q)
+        end do
+        wmo(q,q) = qa(q,q)
+        if (q <= nocca) wmo(q,q) = wmo(q,q) + hza(q,q)
+        wmo(q,q) = 0.5_dp*wmo(q,q)
+      end do
+      call orthogonal_transform('t', nbf, mo_a, wmo, scr, xv)
+      scr = 0.5_dp*scr
+      call pack_matrix(scr, wao)
+
+    ! W^beta, accumulated into the same AO cofactor
+      do q = 1, nbf
+        do p = 1, q-1
+          wmo(p,q) = qb(p,q) + fb(q,q)*z_be(p,q)
+          if (p <= noccb) wmo(p,q) = wmo(p,q) + hzb(p,q)
+          wmo(q,p) = wmo(p,q)
+        end do
+        wmo(q,q) = qb(q,q)
+        if (q <= noccb) wmo(q,q) = wmo(q,q) + hzb(q,q)
+        wmo(q,q) = 0.5_dp*wmo(q,q)
+      end do
+      call orthogonal_transform('t', nbf, mo_b, wmo, scr, xv)
+      call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
+      scr = 0.5_dp*scr
+      call pack_matrix(scr, wrk1t)
+      wao = wao + wrk1t(1:nbf_tri)
+
+    ! Relaxed densities P^sigma = T^sigma + Z^sigma (all blocks)
+      pmo = z_al
+      call dgemm('n','t',nbf,nbf,nbf, &
+                 -1.0_dp, xv, nbf, &
+                          xv, nbf, &
+                  1.0_dp, pmo, nbf)
+      tra = 0.0_dp
+      do p = 1, nbf
+        tra = tra + pmo(p,p)
+      end do
+      call orthogonal_transform('t', nbf, mo_a, pmo, scr, wrk2)
+      call pack_matrix(scr, td_p(:,1))
+
+      pmo = z_be
+      call dgemm('t','n',nbf,nbf,nbf, &
+                  1.0_dp, xv, nbf, &
+                          xv, nbf, &
+                  1.0_dp, pmo, nbf)
+      trb = 0.0_dp
+      do p = 1, nbf
+        trb = trb + pmo(p,p)
+      end do
+      call orthogonal_transform('t', nbf, mo_b, pmo, scr, wrk2)
+      call pack_matrix(scr, td_p(:,2))
+
+      write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+        'tr P(alpha) + 1 =', tra + 1.0_dp, &
+        'tr P(beta) - 1 =', trb - 1.0_dp
+
+      call flush(iw)
+      deallocate(qa, qb, hza, hzb, wmo, pmo, xv, scr)
+
+    end subroutine build_umrsf_p_and_w
+
     ! Lambda wrapper for preconditioner
     subroutine lambda_precond(x_in, x_out)
       real(kind=dp), intent(in) :: x_in(:)
@@ -2288,10 +2471,10 @@ contains
     !> coupled RHS (theory document Eqs. (88)-(92) and Appendix A.3).
     subroutine build_umrsf_zvector_rhs()
 
-      real(kind=dp), allocatable :: ha(:,:), hb(:,:)
       integer :: ok_u
 
-      allocate(ha(nbf,nbf), hb(nbf,nbf), source=0.0_dp, stat=ok_u)
+      allocate(ha_u(nbf,nbf), hb_u(nbf,nbf), hpt_a(nbf,nbf), hpt_b(nbf,nbf), &
+               source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
 
     ! Full Fock matrices in the MO basis (canonical UKS: diagonal up to
@@ -2343,9 +2526,10 @@ contains
           threshold = 1.0d-15, &
           infos = infos)
 
-    ! H+[T] occupied x virtual rectangles of each spin
-      call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
-      call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+    ! H+[T] in the full MO basis (the occ x virt rectangles feed the RHS;
+    ! the occ x occ blocks are needed later for the W assembly)
+      call orthogonal_transform('n', nbf, mo_a, ab1(:,:,1), hpt_a, wrk2)
+      call orthogonal_transform('n', nbf, mo_b, ab1(:,:,2), hpt_b, wrk2)
 
     ! Spin-pairing channel densities at the raw target amplitude; the
     ! transition-density channel uses the effective amplitude (as in RO)
@@ -2389,7 +2573,7 @@ contains
 
     ! Effective amplitude and the per-spin fold matrices
       call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
-      call umrsfqassm(infos, fmrst2(1,:,:,:), wrk3, mo_a, mo_b, fa, fb, ha, hb)
+      call umrsfqassm(infos, fmrst2(1,:,:,:), wrk3, mo_a, mo_b, fa, fb, ha_u, hb_u)
 
     ! Free consistency diagnostics (cheap: one extra matvec assembly, no
     ! extra ERI run): the fold-trace identity G = (tr Ha + tr Hb)/2 must
@@ -2406,7 +2590,7 @@ contains
         call mrsfesum(infos, wrk1, fa, fb, sig, 1)
         gtrace = 0.0_dp
         do it = 1, nbf
-          gtrace = gtrace + 0.5_dp*(ha(it,it)+hb(it,it))
+          gtrace = gtrace + 0.5_dp*(ha_u(it,it)+hb_u(it,it))
         end do
         sig(:,1) = sig(:,1) - mrsf_energies(target_state)*bvec_mo(:,target_state)
         write(iw,'(/5x,a)') 'UMRSF Z-vector consistency checks'
@@ -2417,9 +2601,8 @@ contains
       end block consistency
 
     ! Packed coupled RHS, full residual matrices and free identity checks
-      call usfrorhs(rhs, ab1_mo_a, ab1_mo_b, ha, hb, r_al, r_be, nocca, noccb)
-
-      deallocate(ha, hb)
+      call usfrorhs(rhs, hpt_a(1:nocca,nocca+1:nbf), hpt_b(1:noccb,noccb+1:nbf), &
+                    ha_u, hb_u, r_al, r_be, nocca, noccb)
 
     end subroutine build_umrsf_zvector_rhs
 
