@@ -2196,14 +2196,17 @@ contains
         if (q <= noca_s) val = val + hzs*hz(q,q)
         w(q,q) = val
         do p = 1, q-1
-          if (q > nocca) then
-            ! q in V: ia/xa (p in occ) or ab (p in V) -> transposed fold,
-            ! (F Z) Fock product, no H+[Z]
+          ! Classify relative to THIS spin's occupied/virtual boundary
+          ! (noca_s): for beta, occ = C only and the SOMOs O are virtual.
+          if (q > noca_s .and. p <= noca_s) then
+            ! occupied x virtual -> transposed fold, (F Z) Fock product
+            ! (occupied-index energy), no H+[Z]
             val = qq(q,p) + fz(p,q)
           else
-            ! occupied-side block ij/ix/xy
+            ! occupied-occupied (straight + H+[Z]) or virtual-virtual
+            ! (straight, no H+): straight fold, (Z F) Fock product
             val = qq(p,q) + zf(p,q)
-            if (p <= noca_s) val = val + hzs*hz(p,q)
+            if (q <= noca_s) val = val + hzs*hz(p,q)
           end if
           w(p,q) = val
           w(q,p) = val
