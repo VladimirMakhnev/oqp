@@ -3574,5 +3574,127 @@ contains
 
   end subroutine usfztriv
 
+!###############################################################################
+
+!> @brief Expand the packed UMRSF coupled Z-vector into symmetric per-spin
+!>        MO matrices for the CPKS operator density.
+!>
+!> @details Layout: alpha rectangle occ(alpha) x virt(alpha) first, then the
+!>   beta rectangle occ(beta) x virt(beta).  The pair-multiplier convention
+!>   (L = sum_{p<q} Z_pq F_pq) makes the potential-response density
+!>   D^sigma = 1/2 C (Z + Z^T) C^T, so the MO matrices carry
+!>   M(i,a) = M(a,i) = z_ia/2 (same 1/2 as H+[Z_triv]; fixed by
+!>   devtests/fd_ztriv_test.py).
+  subroutine usfrogen(zma, zmb, zv, noca, nocb)
+
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: zma, zmb
+    real(kind=dp), intent(in), dimension(:) :: zv
+    integer, intent(in) :: noca, nocb
+
+    integer :: i, k, ij, nbf
+
+    nbf = ubound(zma, 1)
+    zma = 0.0_dp
+    zmb = 0.0_dp
+
+    ij = 0
+    do k = noca+1, nbf
+      do i = 1, noca
+        ij = ij+1
+        zma(i,k) = 0.5_dp*zv(ij)
+        zma(k,i) = zma(i,k)
+      end do
+    end do
+    do k = nocb+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        zmb(i,k) = 0.5_dp*zv(ij)
+        zmb(k,i) = zmb(i,k)
+      end do
+    end do
+
+  end subroutine usfrogen
+
+!###############################################################################
+
+!> @brief UMRSF coupled CPKS left-hand side:
+!>        lhs = (eps_virt - eps_occ) * z + H+ rectangles.
+!>
+!> @details Canonical UKS: no Fock inter-block cross couplings (unlike the
+!>   ROHF J-tilde of the RO path); the orbital energies are taken from the
+!>   full MO Fock diagonals of each spin.
+  subroutine usfrolhs(lhs, zv, fa, fb, hpa, hpb, noca, nocb)
+
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: lhs
+    real(kind=dp), intent(in), dimension(:) :: zv
+    real(kind=dp), intent(in), dimension(:,:) :: fa, fb, hpa, hpb
+    integer, intent(in) :: noca, nocb
+
+    integer :: i, k, ij, nbf
+
+    nbf = ubound(fa, 1)
+
+    ij = 0
+    do k = noca+1, nbf
+      do i = 1, noca
+        ij = ij+1
+        lhs(ij) = (fa(k,k)-fa(i,i))*zv(ij) + hpa(i,k-noca)
+      end do
+    end do
+    do k = nocb+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        lhs(ij) = (fb(k,k)-fb(i,i))*zv(ij) + hpb(i,k-nocb)
+      end do
+    end do
+
+  end subroutine usfrolhs
+
+!###############################################################################
+
+!> @brief Diagonal (orbital-energy-gap) preconditioner for the UMRSF
+!>        coupled CPKS system; exact operator diagonal up to the two-electron
+!>        part, with the same packed layout as usfrogen/usfrolhs.
+  subroutine usfromcal(xm, xminv, fa, fb, noca, nocb)
+
+    use precision, only: dp
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: xm, xminv
+    real(kind=dp), intent(in), dimension(:,:) :: fa, fb
+    integer, intent(in) :: noca, nocb
+
+    integer :: i, k, ij, nbf, lzdim
+
+    nbf = ubound(fa, 1)
+
+    ij = 0
+    do k = noca+1, nbf
+      do i = 1, noca
+        ij = ij+1
+        xm(ij) = fa(k,k)-fa(i,i)
+      end do
+    end do
+    do k = nocb+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        xm(ij) = fb(k,k)-fb(i,i)
+      end do
+    end do
+
+    lzdim = ij
+    xminv(1:lzdim) = 1.0_dp/xm(1:lzdim)
+
+  end subroutine usfromcal
+
 end module tdhf_mrsf_lib
 

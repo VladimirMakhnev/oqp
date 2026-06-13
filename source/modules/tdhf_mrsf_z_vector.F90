@@ -686,6 +686,14 @@ contains
     nvira = nbf - nocca
     nvirb = nbf - noccb
 
+    ! UMRSF (UHF/UKS reference): plain unrestricted CPKS operator
+    if (infos%tddft%umrsf) then
+      call apply_z_operator_umrsf(x_in, x_out, infos, basis, molGrid, &
+              int2_driver, nocca, noccb, nbf, mo_a, mo_b, fa, fb, &
+              scale_exch, dft)
+      return
+    end if
+
     if (any(.not. ieee_is_finite(x_in))) then
       x_out = ieee_value(0.0_dp, ieee_quiet_nan)
       write(*,'(" MRSF z-vector operator rejected non-finite input")')
@@ -770,6 +778,112 @@ contains
     deallocate(int2_data)
     
   end subroutine apply_z_operator
+
+  !> UMRSF coupled CPKS operator (Eq. 91 of the theory document):
+  !>   (A z)_ia = (eps_a - eps_i) z_ia + H+_ia[z]
+  !> over the composite space occ(alpha) x virt(alpha) + occ(beta) x
+  !> virt(beta).  Pure (A+B)-type response (int_apb only; no ROHF int_amb
+  !> combinations); the perturbation density follows the pair-multiplier
+  !> 1/2 convention of usfrogen, and fxc receives the doubled symmetric
+  !> density (same preparation as the H+[T] / H+[Z_triv] builders).
+  subroutine apply_z_operator_umrsf(x_in, x_out, infos, basis, molGrid, &
+                                    int2_driver, nocca, noccb, nbf, &
+                                    mo_a, mo_b, fa, fb, scale_exch, dft)
+    use precision, only: dp
+    use types, only: information
+    use basis_tools, only: basis_set
+    use int2_compute, only: int2_compute_t
+    use tdhf_lib, only: int2_tdgrd_data_t
+    use tdhf_mrsf_lib, only: usfrogen, usfrolhs
+    use mod_dft_gridint_fxc, only: utddft_fxc
+    use mathlib, only: orthogonal_transform
+    use mod_dft_molgrid, only: dft_grid_t
+    use tdhf_lib, only: mntoia
+
+    implicit none
+
+    real(kind=dp), intent(in) :: x_in(:)
+    real(kind=dp), intent(out) :: x_out(:)
+    type(information), intent(inout) :: infos
+    type(basis_set), pointer :: basis
+    type(dft_grid_t), intent(inout) :: molGrid
+    type(int2_compute_t), intent(inout) :: int2_driver
+    integer, intent(in) :: nocca, noccb, nbf
+    real(kind=dp), intent(in) :: mo_a(:,:), mo_b(:,:)
+    real(kind=dp), intent(in) :: fa(:,:), fb(:,:), scale_exch
+    logical, intent(in) :: dft
+
+    real(kind=dp), pointer :: ab1(:,:,:)
+    type(int2_tdgrd_data_t), allocatable, target :: int2_data
+
+    if (any(.not. ieee_is_finite(x_in))) then
+      x_out = ieee_value(0.0_dp, ieee_quiet_nan)
+      write(*,'(" UMRSF z-vector operator rejected non-finite input")')
+      return
+    end if
+
+    if (.not. gmres_work_allocated .or. &
+        gmres_nbf /= nbf .or. &
+        gmres_nocca /= nocca .or. &
+        gmres_noccb /= noccb) then
+      call init_gmres_work(nbf, nocca, noccb)
+    end if
+
+    ! Symmetric MO perturbation matrices (1/2 convention) -> AO densities
+    call usfrogen(gmres_wrk1, gmres_wrk2, x_in, nocca, noccb)
+    call orthogonal_transform('t', nbf, mo_a, gmres_wrk1, gmres_pa(:,:,1), gmres_wrk3)
+    call orthogonal_transform('t', nbf, mo_b, gmres_wrk2, gmres_pa(:,:,2), gmres_wrk3)
+
+    allocate(int2_data)
+    int2_data = int2_tdgrd_data_t( &
+        d2 = gmres_pa, &
+        int_apb = .true., &
+        int_amb = .false., &
+        tamm_dancoff = .false., &
+        scale_exchange = scale_exch)
+
+    call int2_driver%run(int2_data, &
+          cam=dft.and.infos%dft%cam_flag, &
+          alpha=infos%dft%cam_alpha, &
+          beta=infos%dft%cam_beta,&
+          mu=infos%dft%cam_mu)
+    ab1 => int2_data%apb(:,:,:,1)
+
+    if (dft) then
+      gmres_pa = gmres_pa*2
+      call utddft_fxc( &
+          basis = basis, &
+          molGrid = molGrid, &
+          isVecs = .true., &
+          wfa = mo_a, &
+          wfb = mo_b, &
+          fxa = ab1(:,:,1:1), &
+          fxb = ab1(:,:,2:2), &
+          dxa = gmres_pa(:,:,1:1), &
+          dxb = gmres_pa(:,:,2:2), &
+          nmtx = 1, &
+          threshold = 1.0d-15, &
+          infos = infos)
+    end if
+
+    if (any(.not. ieee_is_finite(ab1))) then
+      x_out = ieee_value(0.0_dp, ieee_quiet_nan)
+      write(*,'(" UMRSF z-vector operator rejected non-finite response")')
+      call int2_data%clean()
+      deallocate(int2_data)
+      return
+    end if
+
+    call mntoia(ab1(:,:,1), gmres_ab1_mo_a, mo_a, mo_a, nocca, nocca)
+    call mntoia(ab1(:,:,2), gmres_ab1_mo_b, mo_b, mo_b, noccb, noccb)
+
+    call usfrolhs(x_out, x_in, fa, fb, gmres_ab1_mo_a, gmres_ab1_mo_b, &
+                  nocca, noccb)
+
+    call int2_data%clean()
+    deallocate(int2_data)
+
+  end subroutine apply_z_operator_umrsf
 
   ! Apply preconditioner (simple diagonal preconditioner)
   subroutine apply_z_precond(x_in, x_out, xminv)
@@ -1031,7 +1145,8 @@ contains
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
-      int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs, usfztriv
+      int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs, usfztriv, &
+      usfromcal
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -1338,30 +1453,25 @@ contains
       ! Closed-form within-class multipliers (Eq. 94) and their CPKS
       ! feedback H+[Z_triv], moved to the coupled right-hand side.
       call build_umrsf_trivial_multipliers()
-
-      ! Development phase boundary: the coupled solver and P/W assembly
-      ! are enabled in later phases.
-      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: RHS and closed-form multipliers assembled (development).'
-      write(iw,'(x,a)')  'Coupled solver, relaxed density and gradient are not yet enabled; stopping here.'
-      call flush(iw)
-      infos%mol_energy%Z_Vector_converged = .false.
-      if (allocated(int2_data)) call int2_data%clean()
-      call int2_driver%clean()
-      if (dft) call dftclean(infos)
-      call measure_time(print_total=1, log_unit=iw)
-      close(iw)
-      return
+    else
+      call build_mrsf_zvector_rhs()
     end if
-
-    call build_mrsf_zvector_rhs()
 
     write(*,'(/3x,25("-")&
              &/6x,"START Z-VECTOR LOOP (",A,")"&
              &/3x,25("-")/)') trim(solver_name)
     call flush(iw)
 
-    call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
-    call sanitize_zvector_preconditioner(xm, xminv, iw, MRSF_ZVEC_DENOMINATOR_FLOOR, "MRSF")
+    if (umrsf) then
+      call usfromcal(xm, xminv, fa, fb, nocca, noccb)
+      call sanitize_zvector_preconditioner(xm, xminv, iw, MRSF_ZVEC_DENOMINATOR_FLOOR, "UMRSF")
+      ! Development diagnostic (test 4.T1): CG silently fails on a
+      ! nonsymmetric operator, so verify <z,Ay> = <y,Az> explicitly.
+      call check_umrsf_operator_symmetry()
+    else
+      call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
+      call sanitize_zvector_preconditioner(xm, xminv, iw, MRSF_ZVEC_DENOMINATOR_FLOOR, "MRSF")
+    end if
 
     ! ======================================================================
     ! Step 2: solve the z-vector linear system.
@@ -1413,6 +1523,22 @@ contains
     ! ======================================================================
     ! Step 3: build the relaxed density (td_p) and energy-weighted density (wao).
     ! ======================================================================
+    if (umrsf) then
+      ! Store the coupled multipliers (the within-class blocks are already
+      ! in the tags) and verify the solution residual (test 4.T2); the P/W
+      ! assembly is enabled in phase 5.
+      call finish_umrsf_zvector()
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: solved; multipliers stored (development).'
+      write(iw,'(x,a)')  'Relaxed density/W assembly and gradient are not yet enabled; stopping here.'
+      call flush(iw)
+      call int2_driver%clean()
+      if (dft) call dftclean(infos)
+      call measure_time(print_total=1, log_unit=iw)
+      call cleanup_gmres_work()
+      close(iw)
+      return
+    end if
+
     call build_mrsf_relaxed_density_and_w()
 
     call int2_driver%clean()
@@ -1525,6 +1651,13 @@ contains
     ! Preconditioned CG z-vector solve (default path).  All state is
     ! reached by host association, matching the inline version exactly.
     subroutine run_mrsf_cg_zvector()
+
+      ! UMRSF: same PCG loop through the single operator callback (no
+      ! inline matvec duplication, no ROHF-specific int_amb combinations).
+      if (umrsf) then
+        call run_umrsf_cg_zvector()
+        return
+      end if
 
       ! ============================================
       ! ORIGINAL CONJUGATE GRADIENT SOLVER
@@ -1701,6 +1834,139 @@ contains
 
       end do
           end subroutine run_mrsf_cg_zvector
+
+    ! UMRSF preconditioned CG: identical PCG recurrence, matvec through
+    ! apply_z_operator (which dispatches to the unrestricted operator).
+    subroutine run_umrsf_cg_zvector()
+
+      xk = 0.0_dp
+      lhs = 0.0_dp     ! A*0 = 0: skip the initial operator application
+
+      call pcgrbpini(errv, pk, error, rhs, xminv, lhs)
+      if (.not. ieee_is_finite(error) .or. any(.not. ieee_is_finite(errv)) .or. &
+          any(.not. ieee_is_finite(pk)) .or. any(.not. ieee_is_finite(lhs))) then
+        write(iw,'(" UMRSF CG Z-Vector breakdown: non-finite initial PCG state")')
+        mrsf_zvector_breakdown = .true.
+        error = huge(1.0_dp)
+      end if
+
+      write(iw,'(" Initial error =",3x,1p,e10.3,1x,"/",1p,e10.3)') error, cnvtol
+      call flush(iw)
+
+      do iter = 1, infos%control%maxit_zv
+
+        call apply_z_operator(pk, lhs, infos, basis, molGrid, int2_driver, &
+                              nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
+                              fa, fb, scale_exch, dft)
+
+        if (any(.not. ieee_is_finite(lhs)) .or. any(.not. ieee_is_finite(pk))) then
+          write(iw,'(" UMRSF CG Z-Vector breakdown: non-finite lhs/search direction")')
+          mrsf_zvector_breakdown = .true.
+          error = huge(1.0_dp)
+          exit
+        end if
+
+        pap = dot_product(pk, lhs)
+        if (.not. ieee_is_finite(pap) .or. abs(pap) < MRSF_ZVEC_DENOMINATOR_FLOOR) then
+          write(iw,'(" UMRSF CG Z-Vector breakdown: unsafe p^T A p denominator")')
+          mrsf_zvector_breakdown = .true.
+          error = huge(1.0_dp)
+          exit
+        end if
+
+        alpha = 1.0_dp / pap
+        xk = xk + pk * alpha
+        errv = errv - alpha*lhs
+        if (any(.not. ieee_is_finite(xk)) .or. any(.not. ieee_is_finite(errv))) then
+          write(iw,'(" UMRSF CG Z-Vector breakdown: non-finite solution/residual update")')
+          mrsf_zvector_breakdown = .true.
+          error = huge(1.0_dp)
+          exit
+        end if
+
+        error = dot_product(errv, errv)
+        write(iw,'(" Iter#",I2," Error =",&
+              &3x,1p,e10.3,1x,"/",1p,e10.3)') &
+                iter, error, cnvtol
+        call flush(iw)
+
+        if (error<cnvtol) exit
+
+        call pcgb(pk, errv, xminv)
+        if (any(.not. ieee_is_finite(pk))) then
+          write(iw,'(" UMRSF CG Z-Vector breakdown: non-finite search direction after preconditioner")')
+          mrsf_zvector_breakdown = .true.
+          error = huge(1.0_dp)
+          exit
+        end if
+
+      end do
+
+    end subroutine run_umrsf_cg_zvector
+
+    ! Test 4.T1: explicit operator symmetry check on deterministic
+    ! pseudo-random vectors.  CG requires a symmetric (and positive
+    ! definite) operator and fails silently otherwise.
+    subroutine check_umrsf_operator_symmetry()
+
+      real(kind=dp), allocatable :: yv(:), zv(:), ay(:), az(:)
+      real(kind=dp) :: d1, d2
+      integer :: i
+
+      allocate(yv(lzdim), zv(lzdim), ay(lzdim), az(lzdim), source=0.0_dp)
+      do i = 1, lzdim
+        yv(i) = sin(0.7_dp*real(i,dp))
+        zv(i) = cos(1.3_dp*real(i,dp))
+      end do
+      call apply_z_operator(yv, ay, infos, basis, molGrid, int2_driver, &
+                            nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
+                            fa, fb, scale_exch, dft)
+      call apply_z_operator(zv, az, infos, basis, molGrid, int2_driver, &
+                            nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
+                            fa, fb, scale_exch, dft)
+      d1 = dot_product(zv, ay)
+      d2 = dot_product(yv, az)
+      write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+        'Operator symmetry <z,Ay>-<y,Az> =', d1-d2, &
+        'relative =', (d1-d2)/max(abs(d1), abs(d2), 1.0e-30_dp)
+      call flush(iw)
+      deallocate(yv, zv, ay, az)
+
+    end subroutine check_umrsf_operator_symmetry
+
+    ! Store the coupled multipliers into the symmetric Z matrices (the
+    ! within-class blocks were filled by usfztriv) and report the true
+    ! solution residual |A*z - rhs| via one extra operator application
+    ! (test 4.T2).
+    subroutine finish_umrsf_zvector()
+
+      integer :: i, k, ij
+
+      ij = 0
+      do k = nocca+1, nbf
+        do i = 1, nocca
+          ij = ij+1
+          z_al(i,k) = xk(ij)
+          z_al(k,i) = xk(ij)
+        end do
+      end do
+      do k = noccb+1, nbf
+        do i = 1, noccb
+          ij = ij+1
+          z_be(i,k) = xk(ij)
+          z_be(k,i) = xk(ij)
+        end do
+      end do
+
+      call apply_z_operator(xk, lhs, infos, basis, molGrid, int2_driver, &
+                            nocca, noccb, nbf, mo_a, mo_b, mo_energy_a, &
+                            fa, fb, scale_exch, dft)
+      write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+        'True residual |A*z - rhs| =', norm2(lhs - rhs), &
+        'max|Z_coupled| =', maxval(abs(xk))
+      call flush(iw)
+
+    end subroutine finish_umrsf_zvector
 
     ! Lambda wrapper for preconditioner
     subroutine lambda_precond(x_in, x_out)
