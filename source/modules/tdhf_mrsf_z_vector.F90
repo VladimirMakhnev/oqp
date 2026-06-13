@@ -1995,6 +1995,11 @@ contains
                source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
 
+    ! Diagnostic: scale the c_int-driven C-C and V-V within-class multiplier
+    ! blocks (OQP_UMRSF_WCSCALE, default 1) consistently in P, W and H+[Z].
+      call scale_ccvv(z_al)
+      call scale_ccvv(z_be)
+
     ! H+[Z_total]: one-sided density C*triu(Z)*C^T (full multiplier), the
     ! same convention as the CPKS operator (usfrogen) so int2_tdgrd produces
     ! the correct symmetrized exchange
@@ -2122,7 +2127,11 @@ contains
     ! P^sigma = T^sigma + 1/2 Z^sigma (pair-multiplier 1/2, same as in the
     ! H+ feedback; full-matrix T carries no factor).  The Z scale is
     ! env-overridable (OQP_UMRSF_PSCALE) for finite-difference calibration.
+    ! Diagnostic OQP_UMRSF_PNOWC: drop the within-class (occ-occ, virt-virt)
+    ! multiplier blocks from P (keep only occ-virt), to test whether the
+    ! within-class multipliers belong in the relaxed density.
       pmo = umrsf_pscale()*z_al
+      call p_drop_withinclass(pmo, nocca)
       call dgemm('n','t',nbf,nbf,nbf, &
                  -1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2135,6 +2144,7 @@ contains
       call pack_matrix(scr, td_p(:,1))
 
       pmo = umrsf_pscale()*z_be
+      call p_drop_withinclass(pmo, noccb)
       call dgemm('t','n',nbf,nbf,nbf, &
                   1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2154,6 +2164,44 @@ contains
       deallocate(qa, qb, hza, hzb, wmo, pmo, xv, scr)
 
     end subroutine build_umrsf_p_and_w
+
+    !> Diagnostic: zero the within-class (occ-occ, virt-virt) blocks of a
+    !> multiplier matrix, keeping only occ-virt, when OQP_UMRSF_PNOWC is set.
+    subroutine p_drop_withinclass(z, no)
+      real(kind=dp), intent(inout) :: z(:,:)
+      integer, intent(in) :: no
+      character(len=8) :: env
+      integer :: p, q
+      call get_environment_variable('OQP_UMRSF_PNOWC', env)
+      if (len_trim(env) == 0) return
+      do q = 1, nbf
+        do p = 1, nbf
+          ! keep only occ(<=no) x virt(>no) and its transpose
+          if (.not. ((p <= no .and. q > no) .or. (p > no .and. q <= no))) &
+            z(p,q) = 0.0_dp
+        end do
+      end do
+    end subroutine p_drop_withinclass
+
+    !> Diagnostic: scale the C-C (1..nocb) and V-V (noca+1..nbf) blocks of a
+    !> multiplier matrix by OQP_UMRSF_WCSCALE (the c_int-driven within-class
+    !> multipliers), to localize a within-class factor error.
+    subroutine scale_ccvv(z)
+      real(kind=dp), intent(inout) :: z(:,:)
+      character(len=16) :: env
+      integer :: p, q, ios
+      real(kind=dp) :: s
+      call get_environment_variable('OQP_UMRSF_WCSCALE', env)
+      if (len_trim(env) == 0) return
+      read(env, *, iostat=ios) s
+      if (ios /= 0) return
+      do q = 1, nbf
+        do p = 1, nbf
+          if ((p <= noccb .and. q <= noccb) .or. &
+              (p > nocca .and. q > nocca)) z(p,q) = s*z(p,q)
+        end do
+      end do
+    end subroutine scale_ccvv
 
     !> One-sided AO density D = C * triu(Z) * C^T from a symmetric MO
     !> multiplier matrix (strict upper triangle = one multiplier per pair).
