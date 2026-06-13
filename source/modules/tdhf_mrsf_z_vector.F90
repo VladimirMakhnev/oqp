@@ -973,6 +973,26 @@ contains
     gtag(1) = gval
 
     write(iw,'(/x,a,1p,e24.16)') 'UMRSF GVAL =', gval
+
+    ! Frozen-multiplier constraint term L_triv = sum_{p<q} Z_pq F_pq
+    ! (FD test of the H+[Z_triv] convention; requires the Z tags from a
+    ! previous tdhf_umrsf_z_vector run)
+    ltriv_term: block
+      real(kind=dp), contiguous, pointer :: z_al(:,:), z_be(:,:), ltag(:)
+      integer(4) :: tag_id
+      real(kind=dp) :: ltriv
+      if (infos%dat%has_records((/ character(len=80) :: &
+            OQP_umrsf_z_alpha, OQP_umrsf_z_beta /), tag_id) == TA_OK) then
+        call tagarray_get_data(infos%dat, OQP_umrsf_z_alpha, z_al)
+        call tagarray_get_data(infos%dat, OQP_umrsf_z_beta, z_be)
+        ltriv = 0.5_dp*(sum(z_al*fa) + sum(z_be*fb))
+        call infos%dat%remove_records((/ character(len=80) :: OQP_umrsf_ltriv /))
+        call infos%dat%reserve_data(OQP_umrsf_ltriv, TA_TYPE_REAL64, 1, comment=OQP_umrsf_ltriv)
+        call tagarray_get_data(infos%dat, OQP_umrsf_ltriv, ltag)
+        ltag(1) = ltriv
+        write(iw,'(x,a,1p,e24.16)') 'UMRSF LTRIV =', ltriv
+      end if
+    end block ltriv_term
     call flush(iw)
 
     call int2_udata%clean()
@@ -1011,7 +1031,7 @@ contains
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
-      int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs
+      int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs, usfztriv
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -1082,7 +1102,7 @@ contains
       fock_b(:), mo_b(:,:), &
       td_p(:,:), td_t(:,:), ta(:), tb(:), td_abxc(:,:), &
       td_mrsf_den(:,:,:), bvec_mo(:,:), wao(:), mrsf_energies(:), &
-      r_al(:,:), r_be(:,:)
+      r_al(:,:), r_be(:,:), z_al(:,:), z_be(:,:), hzt_a(:,:), hzt_b(:,:)
     character(len=*), parameter :: tags_alloc(4) = (/ character(len=80) :: &
       OQP_WAO, OQP_td_mrsf_density, OQP_td_p, OQP_td_abxc /)
     character(len=*), parameter :: tags_required(8) = (/ character(len=80) :: &
@@ -1213,17 +1233,31 @@ contains
     call tagarray_get_data(infos%dat, OQP_td_p, td_p)
     call tagarray_get_data(infos%dat, OQP_td_abxc, td_abxc)
 
-    ! Development diagnostics: full R^alpha/R^beta residual matrices
-    ! (consumed by devtests/fd_fold_test.py)
+    ! Development diagnostics: full R^alpha/R^beta residual matrices, the
+    ! closed-form multipliers and their CPKS feedback rectangles
+    ! (consumed by devtests/fd_fold_test.py and devtests/fd_ztriv_test.py)
     if (umrsf) then
       call infos%dat%remove_records((/ character(len=80) :: &
-        OQP_umrsf_r_alpha, OQP_umrsf_r_beta /))
+        OQP_umrsf_r_alpha, OQP_umrsf_r_beta, OQP_umrsf_z_alpha, &
+        OQP_umrsf_z_beta, OQP_umrsf_hzt_alpha, OQP_umrsf_hzt_beta /))
       call infos%dat%reserve_data(OQP_umrsf_r_alpha, TA_TYPE_REAL64, nbf*nbf, &
         (/ nbf, nbf /), comment=OQP_umrsf_r_alpha)
       call infos%dat%reserve_data(OQP_umrsf_r_beta, TA_TYPE_REAL64, nbf*nbf, &
         (/ nbf, nbf /), comment=OQP_umrsf_r_beta)
+      call infos%dat%reserve_data(OQP_umrsf_z_alpha, TA_TYPE_REAL64, nbf*nbf, &
+        (/ nbf, nbf /), comment=OQP_umrsf_z_alpha)
+      call infos%dat%reserve_data(OQP_umrsf_z_beta, TA_TYPE_REAL64, nbf*nbf, &
+        (/ nbf, nbf /), comment=OQP_umrsf_z_beta)
+      call infos%dat%reserve_data(OQP_umrsf_hzt_alpha, TA_TYPE_REAL64, &
+        nocca*nvira, (/ nocca, nvira /), comment=OQP_umrsf_hzt_alpha)
+      call infos%dat%reserve_data(OQP_umrsf_hzt_beta, TA_TYPE_REAL64, &
+        noccb*nvirb, (/ noccb, nvirb /), comment=OQP_umrsf_hzt_beta)
       call tagarray_get_data(infos%dat, OQP_umrsf_r_alpha, r_al)
       call tagarray_get_data(infos%dat, OQP_umrsf_r_beta, r_be)
+      call tagarray_get_data(infos%dat, OQP_umrsf_z_alpha, z_al)
+      call tagarray_get_data(infos%dat, OQP_umrsf_z_beta, z_be)
+      call tagarray_get_data(infos%dat, OQP_umrsf_hzt_alpha, hzt_a)
+      call tagarray_get_data(infos%dat, OQP_umrsf_hzt_beta, hzt_b)
     end if
 
     call data_has_tags(infos%dat, tags_required, module_name, subroutine_name, WITH_ABORT)
@@ -1301,10 +1335,14 @@ contains
     if (umrsf) then
       call build_umrsf_zvector_rhs()
 
-      ! Development phase boundary: the coupled solver, closed-form
-      ! multipliers and P/W assembly are enabled in later phases.
-      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: right-hand side assembled (development).'
-      write(iw,'(x,a)')  'Solver, relaxed density and gradient are not yet enabled; stopping here.'
+      ! Closed-form within-class multipliers (Eq. 94) and their CPKS
+      ! feedback H+[Z_triv], moved to the coupled right-hand side.
+      call build_umrsf_trivial_multipliers()
+
+      ! Development phase boundary: the coupled solver and P/W assembly
+      ! are enabled in later phases.
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: RHS and closed-form multipliers assembled (development).'
+      write(iw,'(x,a)')  'Coupled solver, relaxed density and gradient are not yet enabled; stopping here.'
       call flush(iw)
       infos%mol_energy%Z_Vector_converged = .false.
       if (allocated(int2_data)) call int2_data%clean()
@@ -2118,6 +2156,93 @@ contains
       deallocate(ha, hb)
 
     end subroutine build_umrsf_zvector_rhs
+
+    !> Phase 3: closed-form multipliers Z_triv (Eq. 94) from the stored
+    !> residual matrices, and their potential response H+[Z_triv] added to
+    !> the coupled right-hand side: rhs = -R - H+[Z_triv].
+    subroutine build_umrsf_trivial_multipliers()
+
+      integer :: i, k, ij
+
+    ! Z_triv by division (za/zb symmetric, zero diagonal; monitored)
+      call usfztriv(infos, r_al, r_be, fa, fb, z_al, z_be, nocca, noccb)
+
+    ! AO perturbation densities D^sigma = 1/2 * C * Z * C^T: the multipliers
+    ! are per unordered pair (L = sum_{p<q} Z_pq F_pq = 1/2 Tr[Z F]), so the
+    ! potential-response density carries 1/2 relative to a full-matrix
+    ! argument like T (convention fixed by the FD test fd_ztriv_test.py)
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  0.5_dp, mo_a, nbf, &
+                          z_al, nbf, &
+                  0.0_dp, wrk2, nbf)
+      call dgemm('n','t',nbf,nbf,nbf, &
+                  1.0_dp, wrk2, nbf, &
+                          mo_a, nbf, &
+                  0.0_dp, pa(:,:,1), nbf)
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  0.5_dp, mo_b, nbf, &
+                          z_be, nbf, &
+                  0.0_dp, wrk2, nbf)
+      call dgemm('n','t',nbf,nbf,nbf, &
+                  1.0_dp, wrk2, nbf, &
+                          mo_b, nbf, &
+                  0.0_dp, pa(:,:,2), nbf)
+
+    ! H+[Z_triv]: same response machinery as H+[T]
+      if (allocated(int2_data)) call int2_data%clean()
+      int2_data = int2_tdgrd_data_t( &
+          d2 = pa, &
+          int_apb = .true., &
+          int_amb = .false., &
+          tamm_dancoff = .false., &
+          scale_exchange = scale_exch)
+
+      call int2_driver%run(int2_data, &
+              cam=dft.and.infos%dft%cam_flag, &
+              alpha=infos%dft%cam_alpha, &
+              beta=infos%dft%cam_beta,&
+              mu=infos%dft%cam_mu)
+      ab1 => int2_data%apb(:,:,:,1)
+
+      pa = pa*2
+      call utddft_fxc( &
+          basis = basis, &
+          molGrid = molGrid, &
+          isVecs = .true., &
+          wfa = mo_a, &
+          wfb = mo_b, &
+          fxa = ab1(:,:,1:1), &
+          fxb = ab1(:,:,2:2), &
+          dxa = pa(:,:,1:1), &
+          dxb = pa(:,:,2:2), &
+          nmtx = 1, &
+          threshold = 1.0d-15, &
+          infos = infos)
+
+      call mntoia(ab1(:,:,1), hzt_a, mo_a, mo_a, nocca, nocca)
+      call mntoia(ab1(:,:,2), hzt_b, mo_b, mo_b, noccb, noccb)
+
+    ! Move to the coupled RHS
+      ij = 0
+      do k = nocca+1, nbf
+        do i = 1, nocca
+          ij = ij+1
+          rhs(ij) = rhs(ij) - hzt_a(i,k-nocca)
+        end do
+      end do
+      do k = noccb+1, nbf
+        do i = 1, noccb
+          ij = ij+1
+          rhs(ij) = rhs(ij) - hzt_b(i,k-noccb)
+        end do
+      end do
+
+      write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+        'max|H+[Zt]| alpha =', maxval(abs(hzt_a)), &
+        'beta =', maxval(abs(hzt_b))
+      call flush(iw)
+
+    end subroutine build_umrsf_trivial_multipliers
 
   end subroutine tdhf_mrsf_z_vector
 

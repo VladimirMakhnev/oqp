@@ -3472,5 +3472,107 @@ contains
 
   end subroutine usfrorhs
 
+!###############################################################################
+
+!> @brief Closed-form within-class multipliers of the UMRSF Z-vector
+!>        (theory document Eq. (94)).
+!>
+!> @details For all within-class rotations (alpha: C-C, C-O, O-O, V-V;
+!>   beta: C-C, O-V, O-O, V-V) the CPKS feedback cancels in the
+!>   antisymmetrized stationarity condition, leaving diagonal equations
+!>     Z_pq = -R_pq / (eps_q - eps_p),  p < q.
+!>   za/zb are returned symmetric (the pair value at both orderings) with
+!>   zero diagonal, so the AO perturbation density for H+[Z_triv] is simply
+!>   C * Z * C^T.  Near-degenerate denominators are floored and flagged
+!>   (canonical-gauge singularity; see the degeneracy remark in the theory
+!>   document) - for sound states R_pq vanishes faster than the gap.
+!>
+!> @param[in]  ra,rb (nbf,nbf) antisymmetric residual matrices R^sigma
+!> @param[in]  fa,fb full MO Fock matrices (diagonals = orbital energies)
+!> @param[out] za,zb (nbf,nbf) symmetric multiplier matrices, trivial blocks
+  subroutine usfztriv(infos, ra, rb, fa, fb, za, zb, noca, nocb)
+
+    use precision, only: dp
+    use types, only: information
+    use io_constants, only: iw
+
+    implicit none
+
+    type(information), intent(in) :: infos
+    real(kind=dp), intent(in), dimension(:,:) :: ra, rb, fa, fb
+    real(kind=dp), intent(out), dimension(:,:) :: za, zb
+    integer, intent(in) :: noca, nocb
+
+    real(kind=dp), parameter :: denom_floor = 1.0e-6_dp
+    real(kind=dp), parameter :: ratio_warn = 1.0e+2_dp
+    integer :: nbf, nfloor
+    real(kind=dp) :: zmax_blk(8), worst_ratio
+
+    nbf = ubound(fa,1)
+    za = 0.0_dp
+    zb = 0.0_dp
+    nfloor = 0
+    worst_ratio = 0.0_dp
+
+  ! alpha: ij (C-C), ix (C-O), xy (O-O), ab (V-V)
+    call fill_block(za, ra, fa, 1, nocb, 1, nocb, zmax_blk(1))
+    call fill_block(za, ra, fa, 1, nocb, nocb+1, noca, zmax_blk(2))
+    call fill_block(za, ra, fa, nocb+1, noca, nocb+1, noca, zmax_blk(3))
+    call fill_block(za, ra, fa, noca+1, nbf, noca+1, nbf, zmax_blk(4))
+  ! beta: ij (C-C), xa (O-V), xy (O-O), ab (V-V)
+    call fill_block(zb, rb, fb, 1, nocb, 1, nocb, zmax_blk(5))
+    call fill_block(zb, rb, fb, nocb+1, noca, noca+1, nbf, zmax_blk(6))
+    call fill_block(zb, rb, fb, nocb+1, noca, nocb+1, noca, zmax_blk(7))
+    call fill_block(zb, rb, fb, noca+1, nbf, noca+1, nbf, zmax_blk(8))
+
+    write(iw,'(/5x,a)') 'UMRSF closed-form multipliers, max|Z|'
+    write(iw,'(5x,4(a,1p,e12.4,3x))') &
+      'Z(a)ij =', zmax_blk(1), 'Z(a)ix =', zmax_blk(2), &
+      'Z(a)xy =', zmax_blk(3), 'Z(a)ab =', zmax_blk(4)
+    write(iw,'(5x,4(a,1p,e12.4,3x))') &
+      'Z(b)ij =', zmax_blk(5), 'Z(b)xa =', zmax_blk(6), &
+      'Z(b)xy =', zmax_blk(7), 'Z(b)ab =', zmax_blk(8)
+    if (nfloor > 0) then
+      write(iw,'(5x,a,i6,a,1p,e10.2,a)') 'WARNING:', nfloor, &
+        ' within-class denominators below the floor (', denom_floor, ')'
+    end if
+    if (worst_ratio > ratio_warn) then
+      write(iw,'(5x,a,1p,e12.4)') &
+        'WARNING: large multiplier |R|/|d_eps|, worst =', worst_ratio
+    end if
+    call flush(iw)
+
+    return
+
+  contains
+
+    subroutine fill_block(z, r, f, p1, p2, q1, q2, zmax)
+      real(kind=dp), intent(inout) :: z(:,:)
+      real(kind=dp), intent(in) :: r(:,:), f(:,:)
+      integer, intent(in) :: p1, p2, q1, q2
+      real(kind=dp), intent(out) :: zmax
+      integer :: p, q, ptop
+      real(kind=dp) :: denom, zval
+      zmax = 0.0_dp
+      do q = q1, q2
+        ptop = p2
+        if (q1 == p1) ptop = min(p2, q-1)   ! same-class block: p < q
+        do p = p1, ptop
+          denom = f(q,q) - f(p,p)
+          if (abs(denom) < denom_floor) then
+            nfloor = nfloor + 1
+            denom = sign(denom_floor, denom)
+          end if
+          zval = -r(p,q)/denom
+          worst_ratio = max(worst_ratio, abs(zval))
+          z(p,q) = zval
+          z(q,p) = zval
+          zmax = max(zmax, abs(zval))
+        end do
+      end do
+    end subroutine fill_block
+
+  end subroutine usfztriv
+
 end module tdhf_mrsf_lib
 

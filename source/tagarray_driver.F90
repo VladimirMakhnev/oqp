@@ -40,6 +40,11 @@ module oqp_tagarray_driver
   character(len=*), parameter, public :: OQP_umrsf_r_alpha = OQP_prefix // "umrsf_r_alpha"
   character(len=*), parameter, public :: OQP_umrsf_r_beta = OQP_prefix // "umrsf_r_beta"
   character(len=*), parameter, public :: OQP_umrsf_gval = OQP_prefix // "umrsf_gval"
+  character(len=*), parameter, public :: OQP_umrsf_z_alpha = OQP_prefix // "umrsf_z_alpha"
+  character(len=*), parameter, public :: OQP_umrsf_z_beta = OQP_prefix // "umrsf_z_beta"
+  character(len=*), parameter, public :: OQP_umrsf_hzt_alpha = OQP_prefix // "umrsf_hzt_alpha"
+  character(len=*), parameter, public :: OQP_umrsf_hzt_beta = OQP_prefix // "umrsf_hzt_beta"
+  character(len=*), parameter, public :: OQP_umrsf_ltriv = OQP_prefix // "umrsf_ltriv"
   character(len=*), parameter, public :: OQP_nmr_shielding = OQP_prefix // "nmr_shielding"
   character(len=*), parameter, public :: OQP_nmr_shielding_comment = &
     "Isotropic NMR shielding per atom (ppm); shape (5, natom): rows = "// &
