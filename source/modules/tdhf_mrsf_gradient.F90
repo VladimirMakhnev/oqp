@@ -24,6 +24,24 @@ module tdhf_mrsf_gradient_mod
     procedure :: get_density => grd2_mrsf_compute_data_t_get_density
   end type
 
+  ! UMRSF (UHF/UKS reference) two-particle density: 11 spin-pairing channels
+  ! (8 pure-dressed inter + 2 mixed intra + transition density), and the
+  ! relaxed/reference densities are genuinely unrestricted (pa != pb,
+  ! da != db); the Coulomb/exchange sum-difference folding of the RO type is
+  ! reused verbatim (it is already unrestricted for the ROHF reference).
+  type, extends(grd2_compute_data_t) :: grd2_umrsf_compute_data_t
+    real(kind=dp), pointer :: d2(:,:,:) => null()
+    real(kind=dp), pointer :: p2(:,:,:) => null()
+    real(kind=dp), pointer :: spc2(:,:,:) => null()
+    integer :: nbf = 0
+    integer :: mrst = 1
+    real(kind=dp), dimension(3) :: spcscale = [0.0_dp, 0.0_dp, 0.0_dp]
+  contains
+    procedure :: init => grd2_umrsf_compute_data_t_init
+    procedure :: clean => grd2_umrsf_compute_data_t_clean
+    procedure :: get_density => grd2_umrsf_compute_data_t_get_density
+  end type
+
 contains
 
   subroutine tdhf_mrsf_gradient_C(c_handle) bind(C, name="tdhf_mrsf_gradient")
@@ -89,6 +107,7 @@ contains
     integer :: scf_type, mol_mult
 
     real(kind=dp), allocatable :: p(:,:,:), v(:,:,:), d(:,:,:), spc(:,:,:)
+    integer :: nchan
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: dmat_a(:), dmat_b(:), td_mrsf_density(:,:,:), td_abxc(:,:), td_p(:,:)
@@ -112,13 +131,6 @@ contains
     open (unit=iw, file=infos%log_filename, position="append")
   !
     call print_module_info('MRSF_Grad','Computing Gradient of MRSF-TDDFT')
-
-    ! Phase-1 guard: UMRSF gradient assembly is added in later phases.
-    if (umrsf) then
-      write(iw,'(/x,a)') 'UMRSF-TDDFT gradient is under development and not yet functional'
-      call flush(iw)
-      call show_message('UMRSF-TDDFT gradient is under development and not yet functional', with_abort)
-    end if
 !
     write(iw,'(/5X,"Gradient options"/&
                 &5X,18("-")/&
@@ -147,10 +159,13 @@ contains
     call measure_time(print_total=1, log_unit=iw)
     call flush(iw)
 
+    nchan = 7
+    if (umrsf) nchan = 11
+
     allocate(v(nbf,nbf,2), source=0.0d0)
     allocate(d(nbf,nbf,2), source=0.0d0)
     allocate(p(nbf,nbf,2), source=0.0d0)
-    allocate(spc(7,nbf,nbf), source=0.0d0)
+    allocate(spc(nchan,nbf,nbf), source=0.0d0)
 
     call data_has_tags(infos%dat, tags_general, module_name, subroutine_name, WITH_ABORT)
     call tagarray_get_data(infos%dat, OQP_DM_A, dmat_a)
@@ -170,7 +185,7 @@ contains
 
     v(:,:,1) = td_abxc
     if (mrst==1 .or. mrst==3) then
-      spc(1:7,:,:) = td_mrsf_density
+      spc(1:nchan,:,:) = td_mrsf_density(1:nchan,:,:)
     end if
 
 !   Compute xc gradient
@@ -196,7 +211,11 @@ contains
 
 !   Compute 2e gradient
     if (mrst==1 .or. mrst==3) then
-      call mrsf_2e_grad(basis, infos, d, p, spc, v(:,:,1))
+      if (umrsf) then
+        call umrsf_2e_grad(basis, infos, d, p, spc, v(:,:,1))
+      else
+        call mrsf_2e_grad(basis, infos, d, p, spc, v(:,:,1))
+      end if
     else if (mrst==5) then
       call sf_2e_grad(basis, infos, d, p, v(:,:,1))
     end if
@@ -292,6 +311,85 @@ contains
     call gcomp%clean()
 
   end subroutine
+
+!###############################################################################
+
+!> @brief The driver for the UMRSF two electron gradient.
+  subroutine umrsf_2e_grad(basis, infos, d, p, spc, v)
+
+    use basis_tools, only: basis_set
+    use precision, only: dp
+    use messages, only: show_message, WITH_ABORT
+    use types, only: information
+
+    implicit none
+
+    type(information), target, intent(inout) :: infos
+    type(basis_set) :: basis
+    real(kind=dp), contiguous, target :: p(:,:,:), d(:,:,:), spc(:,:,:), v(:,:)
+
+    logical :: dft
+    real(kind=dp) :: scale_exch  !> HF scale in Reference
+    real(kind=dp) :: scale_exch2 !> HF scale in Response
+
+    integer :: ok
+    real(kind=dp), allocatable :: de(:,:)
+    class(grd2_compute_data_t), allocatable :: gcomp
+
+    dft = infos%control%hamilton == 20
+
+    scale_exch = 1.0_dp
+    scale_exch2 = 1.0_dp
+    if (dft) then
+      scale_exch = infos%dft%HFscale
+      scale_exch2 = infos%tddft%HFscale
+    end if
+
+    allocate(de(3,ubound(infos%atoms%zn,1)), source=0.0d0, stat=ok)
+    if(ok/=0) call show_message('cannot allocate memory', WITH_ABORT)
+
+    write(*, '(/7x,"Fitting parameters for UMRSF-TDDFT")')
+    if (.not.infos%dft%cam_flag) then
+      write(*, '(10x,"Exact HF exchange:")')
+      write(*, '(5x,"Reference: |", t20, f6.3, t29, "|")') scale_exch
+      write(*, '(5x,"Response:  |", t20, f6.3, t29, "|")') scale_exch2
+    else
+      write(*, '(10x,"CAM parametres:")')
+      write(*, '(16x,"|   alpha   |    beta   |     mu    |")')
+      write(*, '(5x,"Reference: |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+         infos%dft%cam_alpha, infos%dft%cam_beta, infos%dft%cam_mu
+      write(*, '(5x,"Response:  |", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+         infos%tddft%cam_alpha, infos%tddft%cam_beta, infos%tddft%cam_mu
+    end if
+    write(*, '(10x,"Spin-pair coupling parametres:")')
+    write(*, '(16x,"|   CO-CO   |   OV-OV   |   CO-OV   |")')
+    write(*, '(16x,"|", t20, f6.3, t29, "|", t32, f6.3, t41, "|", t44, f6.3, t53, "|")') &
+       infos%tddft%spc_coco, infos%tddft%spc_ovov, infos%tddft%spc_coov
+
+    gcomp = grd2_umrsf_compute_data_t( d2 = d &
+                                     , p2 = p &
+                                     , spc2 = spc &
+                                     , nbf = basis%nbf &
+                                     , hfscale = scale_exch &
+                                     , hfscale2 = scale_exch2 &
+                                     , spcscale = [infos%tddft%spc_coco, &
+                                                   infos%tddft%spc_ovov, &
+                                                   infos%tddft%spc_coov] &
+                                     , mrst = infos%tddft%mult )
+
+    call gcomp%init()
+
+    call grd2_driver(infos, basis, de, gcomp, &
+                     cam = dft.and.infos%dft%cam_flag, &
+                     alpha = infos%tddft%cam_alpha, &
+                     beta = infos%tddft%cam_beta, &
+                     mu = infos%tddft%cam_mu)
+
+    infos%atoms%grad = infos%atoms%grad + de
+
+    call gcomp%clean()
+
+  end subroutine umrsf_2e_grad
 
 !###############################################################################
 
@@ -510,6 +608,223 @@ contains
       end do
     end do
   end subroutine grd2_mrsf_compute_data_t_get_density
+
+!###############################################################################
+
+  subroutine grd2_umrsf_compute_data_t_init(this)
+    implicit none
+    class(grd2_umrsf_compute_data_t), target, intent(inout) :: this
+
+    call this%clean()
+
+    ! Sum/difference folding of the unrestricted reference and relaxed
+    ! densities, identical to the RO type: channel 1 = D_alpha + D_beta
+    ! (total, Coulomb), channel 2 = D_alpha - D_beta (spin, exchange).
+    this%d2(:,:,1) = this%d2(:,:,1) +   this%d2(:,:,2)
+    this%d2(:,:,2) = this%d2(:,:,1) - 2*this%d2(:,:,2)
+
+    this%p2(:,:,1) = this%p2(:,:,1) +   this%p2(:,:,2)
+    this%p2(:,:,2) = this%p2(:,:,1) - 2*this%p2(:,:,2)
+
+  end subroutine
+
+!###############################################################################
+
+  subroutine grd2_umrsf_compute_data_t_clean(this)
+    implicit none
+    class(grd2_umrsf_compute_data_t), target, intent(inout) :: this
+  end subroutine
+
+!###############################################################################
+
+!> @brief UMRSF two-particle density cofactor for a shell quartet.
+!>
+!> @details Coulomb (total density), same-set exchange (spin sum/diff) and
+!>   the SF transition-density exchange are structurally identical to the RO
+!>   type and reused verbatim.  The spin-pairing part differs: the two intra
+!>   channels co12/o21v keep the RO eight-product exchange patterns, while
+!>   the inter sector is summed over BOTH pure dressings (alpha channels
+!>   bco1a/bco2a/bo2va/bo1va, beta channels bco1b/bco2b/bo2vb/bo1vb) with a
+!>   1/2 weight each, matching the energy code's 1/2(alpha+beta) inter
+!>   average and reducing to the RO single set in the ROHF limit.
+  subroutine grd2_umrsf_compute_data_t_get_density(this, basis, id, dab, dabmax)
+
+    implicit none
+
+    class(grd2_umrsf_compute_data_t), target, intent(inout) :: this
+    type(basis_set), intent(in) :: basis
+    integer, intent(in) :: id(4)
+    real(kind=dp), target, intent(out) :: dab(*)
+    real(kind=dp), intent(out) :: dabmax
+
+    real(kind=dp) :: xcfact, xcfact2, coulfact, df1, dq1, dt2
+    real(kind=dp) :: qfspcp1, qfspcp2, qfspcp3, sgnk
+    real(kind=dp) :: db1, db2, dca, dda, dcb, ddb
+    real(kind=dp), pointer, dimension(:,:) :: &
+      ball, co12, o21v, &
+      bo2va, bo1va, bco1a, bco2a, &
+      bo2vb, bo1vb, bco1b, bco2b
+    integer :: i, j, k, l
+    integer :: loc(4)
+    integer :: nbf(4)
+    real(kind=dp), pointer :: ab(:,:,:,:)
+    integer :: i1, j1, k1, l1
+
+    ! UMRSF channel order (umrsfcbc): 1=bo2va, 2=bo2vb, 3=bo1va, 4=bo1vb,
+    ! 5=bco1a, 6=bco1b, 7=bco2a, 8=bco2b, 9=o21v, 10=co12, 11=ball
+    bo2va => this%spc2(1,:,:)
+    bo2vb => this%spc2(2,:,:)
+    bo1va => this%spc2(3,:,:)
+    bo1vb => this%spc2(4,:,:)
+    bco1a => this%spc2(5,:,:)
+    bco1b => this%spc2(6,:,:)
+    bco2a => this%spc2(7,:,:)
+    bco2b => this%spc2(8,:,:)
+    o21v  => this%spc2(9,:,:)
+    co12  => this%spc2(10,:,:)
+    ball  => this%spc2(11,:,:)
+
+    coulfact = 4*this%coulscale
+    xcfact = this%hfscale
+    xcfact2 = this%hfscale2
+    qfspcp1 = this%spcscale(1)
+    qfspcp2 = this%spcscale(2)
+    qfspcp3 = this%spcscale(3)
+
+    sgnk = 1.0_dp
+    if (this%mrst==3) sgnk = -1.0_dp
+    dabmax = 0
+    loc = basis%ao_offset(id)-1
+
+    nbf = basis%naos(id)
+
+    ab(1:nbf(4),1:nbf(3),1:nbf(2),1:nbf(1)) => dab(1:product(nbf))
+
+    do i = 1, nbf(1)
+      i1 = loc(1) + i
+      do j = 1, nbf(2)
+        j1 = loc(2) + j
+        do k = 1, nbf(3)
+          k1 = loc(3) + k
+          do l = 1, nbf(4)
+            l1 = loc(4) + l
+
+            ! Coulomb (total relaxed/reference density)
+            df1 = (this%d2(i1,j1,1)+this%p2(i1,j1,1))*this%d2(k1,l1,1) &
+                +  this%d2(i1,j1,1)                  *this%p2(k1,l1,1)
+            df1 = df1 * coulfact
+
+            if (xcfact /= 0.0_dp .or. xcfact2 /= 0.0_dp) then
+              ! Same-set exchange (sum/diff) and SF transition exchange
+              dq1 = (this%d2(i1,k1,1)+this%p2(i1,k1,1))*this%d2(j1,l1,1) &
+                  +  this%d2(i1,k1,1)                  *this%p2(j1,l1,1) &
+                  + (this%d2(i1,l1,1)+this%p2(i1,l1,1))*this%d2(j1,k1,1) &
+                  +  this%d2(i1,l1,1)                  *this%p2(j1,k1,1) &
+                  + (this%d2(i1,k1,2)+this%p2(i1,k1,2))*this%d2(j1,l1,2) &
+                  +  this%d2(i1,k1,2)                  *this%p2(j1,l1,2) &
+                  + (this%d2(i1,l1,2)+this%p2(i1,l1,2))*this%d2(j1,k1,2) &
+                  +  this%d2(i1,l1,2)                  *this%p2(j1,k1,2)
+              dt2 = ball(i1,k1)*ball(j1,l1) &
+                  + ball(k1,i1)*ball(l1,j1) &
+                  + ball(i1,l1)*ball(j1,k1) &
+                  + ball(l1,i1)*ball(k1,j1)
+              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*dt2
+            end if
+
+            ! Intra CO (co12, mixed set) -- exchange paired
+            if (qfspcp1 /= 0.0_dp) then
+              db1 =  co12(i1,k1)*co12(l1,j1) &
+                   + co12(i1,l1)*co12(k1,j1) &
+                   + co12(j1,k1)*co12(l1,i1) &
+                   + co12(j1,l1)*co12(k1,i1) &
+                   + co12(l1,j1)*co12(i1,k1) &
+                   + co12(k1,j1)*co12(i1,l1) &
+                   + co12(l1,i1)*co12(j1,k1) &
+                   + co12(k1,i1)*co12(j1,l1)
+              df1 = df1 + sgnk*qfspcp1*db1
+            end if
+
+            ! Intra OV (o21v, mixed set) -- exchange paired
+            if (qfspcp2 /= 0.0_dp) then
+              db2 =  o21v(i1,k1)*o21v(l1,j1) &
+                   + o21v(i1,l1)*o21v(k1,j1) &
+                   + o21v(j1,k1)*o21v(l1,i1) &
+                   + o21v(j1,l1)*o21v(k1,i1) &
+                   + o21v(l1,j1)*o21v(i1,k1) &
+                   + o21v(k1,j1)*o21v(i1,l1) &
+                   + o21v(l1,i1)*o21v(j1,k1) &
+                   + o21v(k1,i1)*o21v(j1,l1)
+              df1 = df1 + sgnk*qfspcp2*db2
+            end if
+
+            ! Inter: 1/2 (alpha + beta) of (2 direct - exchange); each spin
+            ! reuses the RO dc (exchange) / dd (Coulomb, built-in doubling)
+            ! pattern over its own dressed channels.
+            if (qfspcp3 /= 0.0_dp) then
+              dca = inter_dc(bco1a, bco2a, bo2va, bo1va, i1, j1, k1, l1)
+              dda = inter_dd(bco1a, bco2a, bo2va, bo1va, i1, j1, k1, l1)
+              dcb = inter_dc(bco1b, bco2b, bo2vb, bo1vb, i1, j1, k1, l1)
+              ddb = inter_dd(bco1b, bco2b, bo2vb, bo1vb, i1, j1, k1, l1)
+              df1 = df1 + sgnk*qfspcp3*0.5_dp*((-dca+dda) + (-dcb+ddb))
+            end if
+
+            dabmax = max(dabmax, abs(df1))
+            ab(l,k,j,i) = df1*product(basis%bfnrm([i1,j1,k1,l1]))
+          end do
+        end do
+      end do
+    end do
+
+  contains
+
+    ! Exchange-paired inter products (sum of dc1..dc4 of the RO type)
+    function inter_dc(bco1, bco2, bo2v, bo1v, i1, j1, k1, l1) result(dc)
+      real(kind=dp), intent(in), dimension(:,:) :: bco1, bco2, bo2v, bo1v
+      integer, intent(in) :: i1, j1, k1, l1
+      real(kind=dp) :: dc
+      dc = bco1(i1,k1)*bo2v(j1,l1) + bco1(i1,l1)*bo2v(j1,k1) &
+         + bco1(j1,k1)*bo2v(i1,l1) + bco1(j1,l1)*bo2v(i1,k1) &
+         + bco1(l1,j1)*bo2v(k1,i1) + bco1(k1,j1)*bo2v(l1,i1) &
+         + bco1(l1,i1)*bo2v(k1,j1) + bco1(k1,i1)*bo2v(l1,j1) &
+         + bco2(i1,k1)*bo1v(j1,l1) + bco2(i1,l1)*bo1v(j1,k1) &
+         + bco2(j1,k1)*bo1v(i1,l1) + bco2(j1,l1)*bo1v(i1,k1) &
+         + bco2(l1,j1)*bo1v(k1,i1) + bco2(k1,j1)*bo1v(l1,i1) &
+         + bco2(l1,i1)*bo1v(k1,j1) + bco2(k1,i1)*bo1v(l1,j1) &
+         + bo2v(i1,k1)*bco1(j1,l1) + bo2v(i1,l1)*bco1(j1,k1) &
+         + bo2v(j1,k1)*bco1(i1,l1) + bo2v(j1,l1)*bco1(i1,k1) &
+         + bo2v(l1,j1)*bco1(k1,i1) + bo2v(k1,j1)*bco1(l1,i1) &
+         + bo2v(l1,i1)*bco1(k1,j1) + bo2v(k1,i1)*bco1(l1,j1) &
+         + bo1v(i1,k1)*bco2(j1,l1) + bo1v(i1,l1)*bco2(j1,k1) &
+         + bo1v(j1,k1)*bco2(i1,l1) + bo1v(j1,l1)*bco2(i1,k1) &
+         + bo1v(l1,j1)*bco2(k1,i1) + bo1v(k1,j1)*bco2(l1,i1) &
+         + bo1v(l1,i1)*bco2(k1,j1) + bo1v(k1,i1)*bco2(l1,j1)
+    end function inter_dc
+
+    ! Coulomb-paired inter products with the built-in D+D^T doubling
+    ! (sum of dd1..dd4 of the RO type)
+    function inter_dd(bco1, bco2, bo2v, bo1v, i1, j1, k1, l1) result(dd)
+      real(kind=dp), intent(in), dimension(:,:) :: bco1, bco2, bo2v, bo1v
+      integer, intent(in) :: i1, j1, k1, l1
+      real(kind=dp) :: dd
+      dd = bco1(i1,j1)*bo2v(l1,k1) + bco1(i1,j1)*bo2v(k1,l1) &
+         + bco1(j1,i1)*bo2v(l1,k1) + bco1(j1,i1)*bo2v(k1,l1) &
+         + bco1(l1,k1)*bo2v(i1,j1) + bco1(k1,l1)*bo2v(i1,j1) &
+         + bco1(l1,k1)*bo2v(j1,i1) + bco1(k1,l1)*bo2v(j1,i1) &
+         + bco2(i1,j1)*bo1v(l1,k1) + bco2(i1,j1)*bo1v(k1,l1) &
+         + bco2(j1,i1)*bo1v(l1,k1) + bco2(j1,i1)*bo1v(k1,l1) &
+         + bco2(l1,k1)*bo1v(i1,j1) + bco2(k1,l1)*bo1v(i1,j1) &
+         + bco2(l1,k1)*bo1v(j1,i1) + bco2(k1,l1)*bo1v(j1,i1) &
+         + bo2v(i1,j1)*bco1(l1,k1) + bo2v(i1,j1)*bco1(k1,l1) &
+         + bo2v(j1,i1)*bco1(l1,k1) + bo2v(j1,i1)*bco1(k1,l1) &
+         + bo2v(l1,k1)*bco1(i1,j1) + bo2v(k1,l1)*bco1(i1,j1) &
+         + bo2v(l1,k1)*bco1(j1,i1) + bo2v(k1,l1)*bco1(j1,i1) &
+         + bo1v(i1,j1)*bco2(l1,k1) + bo1v(i1,j1)*bco2(k1,l1) &
+         + bo1v(j1,i1)*bco2(l1,k1) + bo1v(j1,i1)*bco2(k1,l1) &
+         + bo1v(l1,k1)*bco2(i1,j1) + bo1v(k1,l1)*bco2(i1,j1) &
+         + bo1v(l1,k1)*bco2(j1,i1) + bo1v(k1,l1)*bco2(j1,i1)
+    end function inter_dd
+
+  end subroutine grd2_umrsf_compute_data_t_get_density
 
 !###############################################################################
 

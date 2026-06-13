@@ -2085,40 +2085,34 @@ contains
       write(iw,'(5x,a,1p,e12.4)') &
         'W-form equivalence on coupled blocks (solver residual level) =', dev_w
 
-    ! W^alpha (pair values; the AO S-cofactor carries the 1/2)
-      do q = 1, nbf
-        do p = 1, q-1
-          wmo(p,q) = qa(p,q) + fa(q,q)*z_al(p,q)
-          if (p <= nocca) wmo(p,q) = wmo(p,q) + hza(p,q)
-          wmo(q,p) = wmo(p,q)
-        end do
-        wmo(q,q) = qa(q,q)
-        if (q <= nocca) wmo(q,q) = wmo(q,q) + hza(q,q)
-        wmo(q,q) = 0.5_dp*wmo(q,q)
-      end do
+    ! Energy-weighted W (symmetric energy-weighted density).  The generic
+    ! form W_pq = Q_pq + eps_q Z_pq + [p in occ] H+_pq[Z] is one of the two
+    ! equivalent forms of Eq. (96) (equal by the corresponding Z equation);
+    ! it is built symmetric and added as the grd1 S-derivative cofactor
+    ! (dens = eijden + 2*wao), with the AO diagonal halved.
+      call build_w_generic(qa, fa, hza, z_al, nocca, wmo)
       call orthogonal_transform('t', nbf, mo_a, wmo, scr, xv)
-      scr = 0.5_dp*scr
+      scr = umrsf_wscale()*scr
+      do p = 1, nbf
+        scr(p,p) = 0.5_dp*scr(p,p)
+      end do
       call pack_matrix(scr, wao)
 
-    ! W^beta, accumulated into the same AO cofactor
-      do q = 1, nbf
-        do p = 1, q-1
-          wmo(p,q) = qb(p,q) + fb(q,q)*z_be(p,q)
-          if (p <= noccb) wmo(p,q) = wmo(p,q) + hzb(p,q)
-          wmo(q,p) = wmo(p,q)
-        end do
-        wmo(q,q) = qb(q,q)
-        if (q <= noccb) wmo(q,q) = wmo(q,q) + hzb(q,q)
-        wmo(q,q) = 0.5_dp*wmo(q,q)
-      end do
+      call build_w_generic(qb, fb, hzb, z_be, noccb, wmo)
       call orthogonal_transform('t', nbf, mo_b, wmo, scr, xv)
-      call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
-      scr = 0.5_dp*scr
+      scr = umrsf_wscale()*scr
+      do p = 1, nbf
+        scr(p,p) = 0.5_dp*scr(p,p)
+      end do
       call pack_matrix(scr, wrk1t)
       wao = wao + wrk1t(1:nbf_tri)
 
-    ! Relaxed densities P^sigma = T^sigma + Z^sigma (all blocks)
-      pmo = z_al
+      call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
+
+    ! Relaxed densities: the one-particle response cofactor is
+    ! P^sigma = T^sigma + 1/2 Z^sigma (pair-multiplier 1/2, same as in the
+    ! H+ feedback; full-matrix T carries no factor)
+      pmo = 0.5_dp*z_al
       call dgemm('n','t',nbf,nbf,nbf, &
                  -1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2130,7 +2124,7 @@ contains
       call orthogonal_transform('t', nbf, mo_a, pmo, scr, wrk2)
       call pack_matrix(scr, td_p(:,1))
 
-      pmo = z_be
+      pmo = 0.5_dp*z_be
       call dgemm('t','n',nbf,nbf,nbf, &
                   1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2150,6 +2144,46 @@ contains
       deallocate(qa, qb, hza, hzb, wmo, pmo, xv, scr)
 
     end subroutine build_umrsf_p_and_w
+
+    !> Symmetric energy-weighted W^sigma (MO), generic form
+    !> W_pq = Q_pq + eps_q Z_pq + [p in occ] H+_pq[Z] (p<q), unhalved
+    !> diagonal Q_tt + [t in occ] H+_tt[Z].  occ(sigma) = 1..noca_s.
+    subroutine build_w_generic(qq, ff, hz, zz, noca_s, w)
+      real(kind=dp), intent(in), dimension(:,:) :: qq, ff, hz, zz
+      integer, intent(in) :: noca_s
+      real(kind=dp), intent(out), dimension(:,:) :: w
+      integer :: p, q
+      real(kind=dp) :: val
+      w = 0.0_dp
+      do q = 1, nbf
+        val = qq(q,q)
+        if (q <= noca_s) val = val + hz(q,q)
+        w(q,q) = val
+        do p = 1, q-1
+          val = qq(p,q) + ff(q,q)*zz(p,q)
+          if (p <= noca_s) val = val + hz(p,q)
+          w(p,q) = val
+          w(q,p) = val
+        end do
+      end do
+    end subroutine build_w_generic
+
+    !> Global W normalization for the grd1 S-derivative cofactor
+    !> (dens = eijden + 2*wao, AO diagonal halved).  Default -0.25 matches
+    !> the RO post-processing scale; overridable via OQP_UMRSF_WSCALE for
+    !> finite-difference calibration.
+    function umrsf_wscale() result(s)
+      real(kind=dp) :: s
+      character(len=32) :: env
+      integer :: ios
+      real(kind=dp) :: v
+      s = -0.25_dp
+      call get_environment_variable('OQP_UMRSF_WSCALE', env)
+      if (len_trim(env) > 0) then
+        read(env, *, iostat=ios) v
+        if (ios == 0) s = v
+      end if
+    end function umrsf_wscale
 
     ! Lambda wrapper for preconditioner
     subroutine lambda_precond(x_in, x_out)
@@ -2603,6 +2637,23 @@ contains
     ! Packed coupled RHS, full residual matrices and free identity checks
       call usfrorhs(rhs, hpt_a(1:nocca,nocca+1:nbf), hpt_b(1:noccb,noccb+1:nbf), &
                     ha_u, hb_u, r_al, r_be, nocca, noccb)
+
+    ! Export the raw fold matrices H (development: Q = 2H drives the W
+    ! assembly; the single-sided FD test fd_fold_test.py --mode q validates
+    ! the symmetric off-diagonal that R = 2(H - H^T) does not cover)
+      block
+        real(kind=dp), contiguous, pointer :: h_al(:,:), h_be(:,:)
+        call infos%dat%remove_records((/ character(len=80) :: &
+          OQP_umrsf_h_alpha, OQP_umrsf_h_beta /))
+        call infos%dat%reserve_data(OQP_umrsf_h_alpha, TA_TYPE_REAL64, nbf*nbf, &
+          (/ nbf, nbf /), comment=OQP_umrsf_h_alpha)
+        call infos%dat%reserve_data(OQP_umrsf_h_beta, TA_TYPE_REAL64, nbf*nbf, &
+          (/ nbf, nbf /), comment=OQP_umrsf_h_beta)
+        call tagarray_get_data(infos%dat, OQP_umrsf_h_alpha, h_al)
+        call tagarray_get_data(infos%dat, OQP_umrsf_h_beta, h_be)
+        h_al = ha_u
+        h_be = hb_u
+      end block
 
     end subroutine build_umrsf_zvector_rhs
 
