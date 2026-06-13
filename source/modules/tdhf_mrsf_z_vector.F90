@@ -811,6 +811,177 @@ contains
     inf%tddft%umrsf = previous_umrsf
   end subroutine tdhf_umrsf_z_vector_C
 
+  subroutine tdhf_umrsf_gval_C(c_handle) bind(C, name="tdhf_umrsf_gval")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    logical :: previous_umrsf
+    inf => oqp_handle_get_info(c_handle)
+    previous_umrsf = inf%tddft%umrsf
+    inf%tddft%umrsf = .true.
+    call tdhf_umrsf_gval(inf)
+    inf%tddft%umrsf = previous_umrsf
+  end subroutine tdhf_umrsf_gval_C
+
+!> @brief Development/test entry: evaluate the amplitude-quadratic functional
+!>        G[X,X] at frozen response amplitudes with the MO coefficients
+!>        currently stored in the tags (finite-difference fold test 2.T1).
+!>
+!> @details Rebuilds the HF Fock matrices from the (possibly rotated)
+!>   coefficients so that finite differences of G over orbital rotations
+!>   capture the potential-response (H+[T]-type) terms; then assembles the
+!>   per-spin folds via umrsfqassm and stores
+!>     G = (tr Ha + tr Hb)/2
+!>   under the OQP_umrsf_gval tag.  HF references only (no fxc/grid terms).
+  subroutine tdhf_umrsf_gval(infos)
+    use precision, only: dp
+    use io_constants, only: iw
+    use oqp_tagarray_driver
+    use types, only: information
+    use basis_tools, only: basis_set
+    use messages, only: show_message, with_abort
+    use int2_compute, only: int2_compute_t
+    use tdhf_lib, only: iatogen
+    use tdhf_mrsf_lib, only: int2_umrsf_data_t, umrsfcbc, umrsfdmat, &
+      umrsfqassm, mrsfxvec
+    use scf_addons, only: fock_jk
+    use mathlib, only: orthogonal_transform_sym, unpack_matrix, pack_matrix
+    use oqp_linalg
+
+    implicit none
+
+    character(len=*), parameter :: subroutine_name = "tdhf_umrsf_gval"
+
+    type(information), target, intent(inout) :: infos
+    type(basis_set), pointer :: basis
+    type(int2_compute_t) :: int2_driver
+    type(int2_umrsf_data_t), allocatable, target :: int2_udata
+    real(kind=dp), allocatable, target :: fmrst1(:,:,:,:), wrk(:,:)
+    real(kind=dp), pointer :: fmrst2(:,:,:,:), wrkt(:)
+    real(kind=dp), allocatable :: dmat(:,:), fmat(:,:), fa(:,:), fb(:,:), &
+      ha(:,:), hb(:,:), xveff(:,:), abxc(:,:), ta_l(:), tb_l(:), bvd(:), &
+      scr(:,:)
+    real(kind=dp), contiguous, pointer :: mo_a(:,:), mo_b(:,:), hcore(:), &
+      bvec_mo(:,:), gtag(:)
+    integer :: nbf, nbf_tri, nocca, noccb, mrst, target_state, i, ok
+    real(kind=dp) :: scale_exch2, gval
+    character(len=*), parameter :: tags_required(4) = (/ character(len=80) :: &
+      OQP_VEC_MO_A, OQP_VEC_MO_B, OQP_Hcore, OQP_td_bvec_mo /)
+
+    open (unit=iw, file=infos%log_filename, position="append")
+
+    if (infos%control%hamilton == 20) then
+      write(iw,'(/x,a)') 'tdhf_umrsf_gval supports HF references only (development FD harness)'
+      call flush(iw)
+      call show_message('tdhf_umrsf_gval supports HF references only', with_abort)
+    end if
+    if (infos%control%scftype /= 2) &
+      call show_message('tdhf_umrsf_gval requires a UHF reference', with_abort)
+
+    basis => infos%basis
+    basis%atoms => infos%atoms
+    nbf = basis%nbf
+    nbf_tri = nbf*(nbf+1)/2
+    nocca = infos%mol_prop%nelec_a
+    noccb = infos%mol_prop%nelec_b
+    mrst = infos%tddft%mult
+    target_state = min(infos%tddft%target_state, infos%tddft%nstate)
+
+    call data_has_tags(infos%dat, tags_required, module_name, subroutine_name, WITH_ABORT)
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_B, mo_b)
+    call tagarray_get_data(infos%dat, OQP_Hcore, hcore)
+    call tagarray_get_data(infos%dat, OQP_td_bvec_mo, bvec_mo)
+
+    allocate(dmat(nbf_tri,2), fmat(nbf_tri,2), fa(nbf,nbf), fb(nbf,nbf), &
+             ha(nbf,nbf), hb(nbf,nbf), xveff(nbf,nbf), wrk(nbf,nbf), &
+             scr(nbf,nbf), abxc(nbf,nbf), ta_l(nbf_tri), tb_l(nbf_tri), &
+             bvd(nocca*(nbf-noccb)), fmrst1(1,11,nbf,nbf), &
+             source=0.0_dp, stat=ok)
+    if (ok/=0) call show_message('Cannot allocate memory', with_abort)
+
+  ! HF Fock matrices rebuilt from the current (possibly rotated) coefficients
+    call dgemm('n','t',nbf,nbf,nocca, &
+               1.0_dp, mo_a, nbf, &
+                       mo_a, nbf, &
+               0.0_dp, scr, nbf)
+    call pack_matrix(scr, dmat(:,1))
+    call dgemm('n','t',nbf,nbf,noccb, &
+               1.0_dp, mo_b, nbf, &
+                       mo_b, nbf, &
+               0.0_dp, scr, nbf)
+    call pack_matrix(scr, dmat(:,2))
+
+    call fock_jk(basis, dmat, fmat, infos)
+    fmat(:,1) = fmat(:,1) + hcore
+    fmat(:,2) = fmat(:,2) + hcore
+
+    wrkt(1:nbf*nbf) => wrk
+    call orthogonal_transform_sym(nbf, nbf, fmat(:,1), mo_a, nbf, wrk)
+    call unpack_matrix(wrkt, fa)
+    call orthogonal_transform_sym(nbf, nbf, fmat(:,2), mo_b, nbf, wrk)
+    call unpack_matrix(wrkt, fb)
+
+  ! Frozen amplitudes: effective (folds, transition density) and raw (channels)
+    call mrsfxvec(infos, bvec_mo(:,target_state), bvd)
+    call umrsfdmat(bvd, abxc, mo_a, mo_b, ta_l, tb_l, nocca, noccb)
+    call iatogen(bvd, xveff, nocca, noccb)
+
+    call iatogen(bvec_mo(:,target_state), wrk, nocca, noccb)
+    call umrsfcbc(infos, mo_a, mo_b, wrk, fmrst1(1,:,:,:))
+    fmrst1(1,11,:,:) = abxc
+
+    scale_exch2 = 1.0_dp
+
+    call int2_driver%init(basis, infos)
+    call int2_driver%set_screening()
+
+    int2_udata = int2_umrsf_data_t( &
+        d3 = fmrst1, &
+        tamm_dancoff = .true., &
+        scale_exchange = scale_exch2, &
+        scale_coulomb = scale_exch2)
+    call int2_driver%run(int2_udata, cam=.false.)
+    fmrst2 => int2_udata%f3(:,:,:,:,1)
+
+    if (mrst==3) fmrst2(:,1:10,:,:) = -fmrst2(:,1:10,:,:)
+
+    if (abs(infos%tddft%hfscale) > epsilon(1.0_dp)) then
+      if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
+        fmrst2(:,10,:,:) = fmrst2(:,10,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
+      if (infos%tddft%spc_ovov /= infos%tddft%hfscale) &
+        fmrst2(:,9,:,:) = fmrst2(:,9,:,:) * infos%tddft%spc_ovov / infos%tddft%hfscale
+      if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
+        fmrst2(:,1:8,:,:) = fmrst2(:,1:8,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
+    else if (infos%tddft%spc_coco /= 0.0_dp .or. &
+             infos%tddft%spc_ovov /= 0.0_dp .or. &
+             infos%tddft%spc_coov /= 0.0_dp) then
+      call show_message('UMRSF-TDDFT spin-pair coupling overrides require nonzero HFscale.', with_abort)
+    end if
+
+    call umrsfqassm(infos, fmrst2(1,:,:,:), xveff, mo_a, mo_b, fa, fb, ha, hb)
+
+    gval = 0.0_dp
+    do i = 1, nbf
+      gval = gval + 0.5_dp*(ha(i,i)+hb(i,i))
+    end do
+
+    call infos%dat%remove_records((/ character(len=80) :: OQP_umrsf_gval /))
+    call infos%dat%reserve_data(OQP_umrsf_gval, TA_TYPE_REAL64, 1, comment=OQP_umrsf_gval)
+    call tagarray_get_data(infos%dat, OQP_umrsf_gval, gtag)
+    gtag(1) = gval
+
+    write(iw,'(/x,a,1p,e24.16)') 'UMRSF GVAL =', gval
+    call flush(iw)
+
+    call int2_udata%clean()
+    call int2_driver%clean()
+
+    close(iw)
+
+  end subroutine tdhf_umrsf_gval
+
   subroutine tdhf_mrsf_z_vector(infos)
     use precision, only: dp
     use io_constants, only: iw
@@ -839,7 +1010,8 @@ contains
 
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
-      mrsfqrorhs, mrsfqropcal, mrsfqrowcal
+      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
+      int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -879,9 +1051,11 @@ contains
 
     type(int2_compute_t) :: int2_driver
     type(int2_mrsf_data_t), allocatable, target :: int2_data_st
+    type(int2_umrsf_data_t), allocatable, target :: int2_udata_st
     type(int2_td_data_t), allocatable, target :: int2_data_q
     class(int2_td_data_t), allocatable, target :: int2_data
     type(dft_grid_t) :: molGrid
+    integer :: nchan
 
   ! scr data
     real(kind=dp), allocatable, target :: wrk1(:,:), wrk2(:,:), wrk3(:,:)
@@ -907,7 +1081,8 @@ contains
       fock_a(:), mo_a(:,:), mo_energy_a(:), &
       fock_b(:), mo_b(:,:), &
       td_p(:,:), td_t(:,:), ta(:), tb(:), td_abxc(:,:), &
-      td_mrsf_den(:,:,:), bvec_mo(:,:), wao(:), mrsf_energies(:)
+      td_mrsf_den(:,:,:), bvec_mo(:,:), wao(:), mrsf_energies(:), &
+      r_al(:,:), r_be(:,:)
     character(len=*), parameter :: tags_alloc(4) = (/ character(len=80) :: &
       OQP_WAO, OQP_td_mrsf_density, OQP_td_p, OQP_td_abxc /)
     character(len=*), parameter :: tags_required(8) = (/ character(len=80) :: &
@@ -938,14 +1113,6 @@ contains
       call show_message('UMRSF-TDDFT Z-vector requires a UHF reference (scf type=uhf)', with_abort)
     end if
 
-    ! Phase-1 guard: the UMRSF Z-vector machinery is added in later phases
-    ! (unrelaxed/RHS, closed-form multipliers, 4-block CPKS, P/W assembly).
-    if (umrsf) then
-      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector is under development and not yet functional'
-      call flush(iw)
-      call show_message('UMRSF-TDDFT Z-vector is under development and not yet functional', with_abort)
-    end if
-
   ! Readings
 
   ! Load basis set
@@ -961,18 +1128,29 @@ contains
     mrst = infos%tddft%mult
     cnvtol = infos%tddft%zvconv
 
+    if (umrsf .and. mrst==5) then
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector does not support quintet response'
+      call flush(iw)
+      call show_message('UMRSF-TDDFT Z-vector does not support quintet response', with_abort)
+    end if
+
     nocca = infos%mol_prop%nelec_A
     nvira = nbf-noccA
     noccb = infos%mol_prop%nelec_B
     nvirb = nbf-noccb
     nsocc = nocca-noccb
     lzdim = noccb*(nsocc+nvira)+nsocc*nvira
+  ! UMRSF coupled CPKS space: occ(alpha) x virt(alpha) + occ(beta) x virt(beta)
+    if (umrsf) lzdim = nocca*nvira + noccb*nvirb
+  ! UMRSF uses 11 spin-pairing/response density channels, RO-MRSF uses 7
+    nchan = 7
+    if (umrsf) nchan = 11
 
     if(mrst==1 .or. mrst==3) then
       xvec_dim = nocca*nvirb
       allocate(&
     ! for Z-vector
-        fmrst1(1,7,nbf,nbf), &
+        fmrst1(1,nchan,nbf,nbf), &
         bvec_mo_d(xvec_dim,1), &
         hxa(nbf,nocca), &
         hxb(nbf,nbf), &
@@ -1025,7 +1203,7 @@ contains
     call infos%dat%remove_records(tags_alloc)
 
     call infos%dat%reserve_data(OQP_WAO, TA_TYPE_REAL64, nbf_tri, comment=OQP_WAO_comment)
-    call infos%dat%reserve_data(OQP_td_mrsf_density, TA_TYPE_REAL64, nbf*nbf*7, (/7, nbf, nbf /), comment=OQP_td_mrsf_density)
+    call infos%dat%reserve_data(OQP_td_mrsf_density, TA_TYPE_REAL64, nbf*nbf*nchan, (/nchan, nbf, nbf /), comment=OQP_td_mrsf_density)
     call infos%dat%reserve_data(OQP_td_p, TA_TYPE_REAL64, nbf_tri*2, (/ nbf_tri, 2 /), comment=OQP_td_p)
     call infos%dat%reserve_data(OQP_td_abxc, TA_TYPE_REAL64, nbf*nbf, (/ nbf, nbf /), comment=OQP_td_abxc)
 
@@ -1034,6 +1212,19 @@ contains
     call tagarray_get_data(infos%dat, OQP_td_mrsf_density, td_mrsf_den)
     call tagarray_get_data(infos%dat, OQP_td_p, td_p)
     call tagarray_get_data(infos%dat, OQP_td_abxc, td_abxc)
+
+    ! Development diagnostics: full R^alpha/R^beta residual matrices
+    ! (consumed by devtests/fd_fold_test.py)
+    if (umrsf) then
+      call infos%dat%remove_records((/ character(len=80) :: &
+        OQP_umrsf_r_alpha, OQP_umrsf_r_beta /))
+      call infos%dat%reserve_data(OQP_umrsf_r_alpha, TA_TYPE_REAL64, nbf*nbf, &
+        (/ nbf, nbf /), comment=OQP_umrsf_r_alpha)
+      call infos%dat%reserve_data(OQP_umrsf_r_beta, TA_TYPE_REAL64, nbf*nbf, &
+        (/ nbf, nbf /), comment=OQP_umrsf_r_beta)
+      call tagarray_get_data(infos%dat, OQP_umrsf_r_alpha, r_al)
+      call tagarray_get_data(infos%dat, OQP_umrsf_r_beta, r_be)
+    end if
 
     call data_has_tags(infos%dat, tags_required, module_name, subroutine_name, WITH_ABORT)
     call tagarray_get_data(infos%dat, OQP_FOCK_A, fock_a)
@@ -1070,7 +1261,11 @@ contains
     ! Save unrelaxed density matrices and the `b=A*x` vector for target state
     if (mrst==1 .or. mrst==3 ) then
       call mrsfxvec(infos, bvec_mo(:,target_state), bvec_mo_d(:,1))
-      call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb)
+      if (umrsf) then
+        call umrsfdmat(bvec_mo_d(:,1), td_abxc, mo_a, mo_b, ta, tb, nocca, noccb)
+      else
+        call sfdmat(bvec_mo_d(:,1), td_abxc, mo_a, ta, tb, nocca, noccb)
+      end if
     else if (mrst==5 ) then
       call sfdmat(bvec_mo(:,target_state), td_abxc, mo_a, tb, ta, noccb, nocca)
     end if
@@ -1103,6 +1298,23 @@ contains
     ! ======================================================================
     ! Step 1: assemble the z-vector right-hand side and Fock/density pieces.
     ! ======================================================================
+    if (umrsf) then
+      call build_umrsf_zvector_rhs()
+
+      ! Development phase boundary: the coupled solver, closed-form
+      ! multipliers and P/W assembly are enabled in later phases.
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: right-hand side assembled (development).'
+      write(iw,'(x,a)')  'Solver, relaxed density and gradient are not yet enabled; stopping here.'
+      call flush(iw)
+      infos%mol_energy%Z_Vector_converged = .false.
+      if (allocated(int2_data)) call int2_data%clean()
+      call int2_driver%clean()
+      if (dft) call dftclean(infos)
+      call measure_time(print_total=1, log_unit=iw)
+      close(iw)
+      return
+    end if
+
     call build_mrsf_zvector_rhs()
 
     write(*,'(/3x,25("-")&
@@ -1766,6 +1978,146 @@ contains
                         tab, tij, fa, fb, nocca, noccb)
       end if
     end subroutine build_mrsf_zvector_rhs
+
+    !> UMRSF (UHF/UKS reference) Z-vector right-hand side, development phase 2:
+    !> unrelaxed objects, H+[T], spin-pairing fold assembly and the packed
+    !> coupled RHS (theory document Eqs. (88)-(92) and Appendix A.3).
+    subroutine build_umrsf_zvector_rhs()
+
+      real(kind=dp), allocatable :: ha(:,:), hb(:,:)
+      integer :: ok_u
+
+      allocate(ha(nbf,nbf), hb(nbf,nbf), source=0.0_dp, stat=ok_u)
+      if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
+
+    ! Full Fock matrices in the MO basis (canonical UKS: diagonal up to
+    ! convergence noise; the assembly uses the full matrices)
+      wrk1t(1:nbf*nbf) => wrk1
+      call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, wrk1)
+      call unpack_matrix(wrk1t, fa)
+      call orthogonal_transform_sym(nbf, nbf, fock_b, mo_b, nbf, wrk1)
+      call unpack_matrix(wrk1t, fb)
+
+    ! Unrelaxed difference densities (AO, from umrsfdmat)
+      call unpack_matrix(ta, pa(:,:,1))
+      call unpack_matrix(tb, pa(:,:,2))
+
+      scale_exch = 1.0_dp
+      scale_exch2 = 1.0_dp
+      if (dft) then
+         scale_exch = infos%dft%HFscale    !> Reference HF exchange
+         scale_exch2 = infos%tddft%HFscale !> Response HF exchange
+      end if
+
+    ! H+[T]: Coulomb/exchange with the reference exchange scale, plus fxc
+      int2_data = int2_tdgrd_data_t( &
+          d2 = pa, &
+          int_apb = .true., &
+          int_amb = .false., &
+          tamm_dancoff = .false., &
+          scale_exchange = scale_exch)
+
+      call int2_driver%run(int2_data, &
+              cam=dft.and.infos%dft%cam_flag, &
+              alpha=infos%dft%cam_alpha, &
+              beta=infos%dft%cam_beta,&
+              mu=infos%dft%cam_mu)
+      ab1 => int2_data%apb(:,:,:,1)
+
+      pa = pa*2
+      call utddft_fxc( &
+          basis = basis, &
+          molGrid = molGrid, &
+          isVecs = .true., &
+          wfa = mo_a, &
+          wfb = mo_b, &
+          fxa = ab1(:,:,1:1), &
+          fxb = ab1(:,:,2:2), &
+          dxa = pa(:,:,1:1), &
+          dxb = pa(:,:,2:2), &
+          nmtx = 1, &
+          threshold = 1.0d-15, &
+          infos = infos)
+
+    ! H+[T] occupied x virtual rectangles of each spin
+      call mntoia(ab1(:,:,1), ab1_mo_a, mo_a, mo_a, nocca, nocca)
+      call mntoia(ab1(:,:,2), ab1_mo_b, mo_b, mo_b, noccb, noccb)
+
+    ! Spin-pairing channel densities at the raw target amplitude; the
+    ! transition-density channel uses the effective amplitude (as in RO)
+      call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
+      call umrsfcbc(infos, mo_a, mo_b, wrk1, fmrst1(1,:,:,:))
+      fmrst1(1,11,:,:) = td_abxc
+
+      td_mrsf_den(1:11,:,:) = fmrst1(1,1:11,:,:)
+
+      int2_udata_st = int2_umrsf_data_t( &
+          d3 = fmrst1, &
+          tamm_dancoff = .true., &
+          scale_exchange = scale_exch2, &
+          scale_coulomb = scale_exch2)
+
+      call int2_driver%run(int2_udata_st, &
+            cam = dft.and.infos%dft%cam_flag, &
+            alpha = infos%tddft%cam_alpha, &
+            alpha_coulomb = infos%tddft%cam_alpha, &
+            beta = infos%tddft%cam_beta,&
+            beta_coulomb = infos%tddft%cam_beta, &
+            mu = infos%tddft%cam_mu)
+      fmrst2 => int2_udata_st%f3(:,:,:,:,1)
+
+    ! Scaling factor if triplet
+      if (mrst==3) fmrst2(:,1:10,:,:) = -fmrst2(:,1:10,:,:)
+
+    ! Spin-pair coupling (same preparation as the energy matvec)
+      if (abs(infos%tddft%hfscale) > epsilon(1.0_dp)) then
+        if (infos%tddft%spc_coco /= infos%tddft%hfscale) &
+          fmrst2(:,10,:,:) = fmrst2(:,10,:,:) * infos%tddft%spc_coco / infos%tddft%hfscale
+        if (infos%tddft%spc_ovov /= infos%tddft%hfscale) &
+          fmrst2(:,9,:,:) = fmrst2(:,9,:,:) * infos%tddft%spc_ovov / infos%tddft%hfscale
+        if (infos%tddft%spc_coov /= infos%tddft%hfscale) &
+          fmrst2(:,1:8,:,:) = fmrst2(:,1:8,:,:) * infos%tddft%spc_coov / infos%tddft%hfscale
+      else if (infos%tddft%spc_coco /= 0.0_dp .or. &
+               infos%tddft%spc_ovov /= 0.0_dp .or. &
+               infos%tddft%spc_coov /= 0.0_dp) then
+        call show_message('UMRSF-TDDFT spin-pair coupling overrides require nonzero HFscale.', with_abort)
+      end if
+
+    ! Effective amplitude and the per-spin fold matrices
+      call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
+      call umrsfqassm(infos, fmrst2(1,:,:,:), wrk3, mo_a, mo_b, fa, fb, ha, hb)
+
+    ! Free consistency diagnostics (cheap: one extra matvec assembly, no
+    ! extra ERI run): the fold-trace identity G = (tr Ha + tr Hb)/2 must
+    ! reproduce omega(target), and the converged amplitude must satisfy the
+    ! eigenrelation under the same channel responses that feed the folds.
+      consistency: block
+        use tdhf_mrsf_lib, only: umrsfmntoia, mrsfesum
+        real(kind=dp), allocatable :: sig(:,:)
+        real(kind=dp) :: gtrace
+        integer :: it
+        allocate(sig(xvec_dim,1), source=0.0_dp)
+        call umrsfmntoia(infos, fmrst2(1,:,:,:), sig, mo_a, mo_b, 1)
+        call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
+        call mrsfesum(infos, wrk1, fa, fb, sig, 1)
+        gtrace = 0.0_dp
+        do it = 1, nbf
+          gtrace = gtrace + 0.5_dp*(ha(it,it)+hb(it,it))
+        end do
+        sig(:,1) = sig(:,1) - mrsf_energies(target_state)*bvec_mo(:,target_state)
+        write(iw,'(/5x,a)') 'UMRSF Z-vector consistency checks'
+        write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+          'G(fold trace) - omega =', gtrace - mrsf_energies(target_state), &
+          '|A*x - omega*x| =', norm2(sig(:,1))
+        call flush(iw)
+      end block consistency
+
+    ! Packed coupled RHS, full residual matrices and free identity checks
+      call usfrorhs(rhs, ab1_mo_a, ab1_mo_b, ha, hb, r_al, r_be, nocca, noccb)
+
+      deallocate(ha, hb)
+
+    end subroutine build_umrsf_zvector_rhs
 
   end subroutine tdhf_mrsf_z_vector
 

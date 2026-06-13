@@ -34,6 +34,12 @@ module oqp_tagarray_driver
   character(len=*), parameter, public :: OQP_td_triplet_energies = OQP_prefix // "td_triplet_energies"    !new
   character(len=*), parameter, public :: OQP_td_bvec_mo_s = OQP_prefix // "td_bvec_mo_s"                  !new
   character(len=*), parameter, public :: OQP_td_bvec_mo_t = OQP_prefix // "td_bvec_mo_t"                  !new
+  ! UMRSF gradient development tags: full per-spin Z-vector RHS matrices
+  ! R^sigma(t,u) and the frozen-amplitude G value used by the
+  ! finite-difference fold tests (devtests/fd_fold_test.py).
+  character(len=*), parameter, public :: OQP_umrsf_r_alpha = OQP_prefix // "umrsf_r_alpha"
+  character(len=*), parameter, public :: OQP_umrsf_r_beta = OQP_prefix // "umrsf_r_beta"
+  character(len=*), parameter, public :: OQP_umrsf_gval = OQP_prefix // "umrsf_gval"
   character(len=*), parameter, public :: OQP_nmr_shielding = OQP_prefix // "nmr_shielding"
   character(len=*), parameter, public :: OQP_nmr_shielding_comment = &
     "Isotropic NMR shielding per atom (ppm); shape (5, natom): rows = "// &

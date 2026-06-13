@@ -26,6 +26,7 @@ module tdhf_mrsf_lib
     contains
 
         procedure :: update => int2_umrsf_data_t_update
+        procedure :: init_screen => int2_umrsf_data_t_init_screen
 
     end type
 
@@ -116,6 +117,33 @@ contains
     this%max_den = maxval(abs(this%dsh))
 
   end subroutine
+
+!###############################################################################
+
+  subroutine int2_umrsf_data_t_init_screen(this, basis)
+
+    implicit none
+
+    class(int2_umrsf_data_t), target, intent(inout) :: this
+    type(basis_set), intent(in) :: basis
+    real(kind=dp), allocatable :: dsh_n(:,:)
+    integer :: n
+
+!   Conservative density screening bound: the UMRSF spin-pairing channel
+!   densities (rank-one B-channels, o21v, co12) are not bounded by the
+!   transition density (last channel, ball) alone, so take the elementwise
+!   shell-pair max over all channels.  Screening from ball only loses real
+!   channel contributions far above the integral cutoff (observed ~1e-3 in
+!   the o21v response), which breaks energy/Z-vector operator consistency.
+    allocate(dsh_n, mold=this%dsh)
+    this%dsh = 0.0_dp
+    do n = 1, ubound(this%d3,2)
+      call shell_den_screen_mrsf(dsh_n, this%d3(:,n,:,:), basis)
+      this%dsh = max(this%dsh, dsh_n)
+    end do
+    this%max_den = maxval(abs(this%dsh))
+
+  end subroutine int2_umrsf_data_t_init_screen
 
 !###############################################################################
 
@@ -3168,6 +3196,281 @@ contains
     deallocate(scr1,scr2)
 
   end subroutine umrsfdmat
+
+!###############################################################################
+
+!> @brief Assemble the per-spin fold matrices H_{tu,sigma}[X,X] of the UMRSF
+!>        Z-vector right-hand side.
+!>
+!> @details H = H^(0) + H^SP (theory document Eqs. (84)-(85) and the boxed
+!>   spin-pairing folds of Appendix A.3):
+!>     H^(0)_{tu,alpha} = sum_q X(t,q) * sigma0(u,q)
+!>     H^(0)_{tu,beta}  = sum_p X(p,t) * sigma0(p,u)
+!>     sigma0 = X*Fb - Fa*X + Ca^T * agdlr * Cb
+!>   The spin-pairing folds are sandwiches of the ten scaled channel
+!>   responses with the block amplitudes d^m_i = X(i,O_m), v^m_a = X(O_m,a).
+!>   The channel responses in fmrsf must already carry the response exchange
+!>   scale, the triplet sign flip and the three spin-pair coupling constants
+!>   (same preparation as in the energy matvec).
+!>   Trace identity used by the finite-difference test entry:
+!>     G[X,X] = (tr Ha + tr Hb)/2.
+!>
+!> @param[in]  fmrsf  (11,nbf,nbf) scaled AO channel responses of one state
+!> @param[in]  xv     (nbf,nbf) effective amplitude (iatogen of mrsfxvec output)
+!> @param[in]  va,vb  alpha/beta MO coefficients
+!> @param[in]  fa,fb  full alpha/beta Fock matrices in MO basis
+!> @param[out] ha,hb  (nbf,nbf) fold matrices H_{tu,alpha}, H_{tu,beta}
+  subroutine umrsfqassm(infos, fmrsf, xv, va, vb, fa, fb, ha, hb)
+
+    use precision, only: dp
+    use types, only: information
+    use messages, only: show_message, with_abort
+
+    implicit none
+
+    type(information), intent(in) :: infos
+    real(kind=dp), intent(in), dimension(:,:,:) :: fmrsf
+    real(kind=dp), intent(in), dimension(:,:) :: xv, va, vb, fa, fb
+    real(kind=dp), intent(out), dimension(:,:) :: ha, hb
+
+    real(kind=dp), allocatable, dimension(:,:) :: sg0, wrk, &
+      m10, m9, m1aa, m1bb, m2aa, m2bb, k1aa, k1bb, k2aa, k2bb
+    real(kind=dp), allocatable, dimension(:) :: d1, d2, v1, v2
+    integer :: nbf, nocca, noccb, ncl, nvira, lr1, lr2, t, u, ok
+
+    nbf = infos%basis%nbf
+    nocca = infos%mol_prop%nelec_a
+    noccb = infos%mol_prop%nelec_b
+    ncl = nocca-2
+    nvira = nbf-nocca
+    lr1 = nocca-1
+    lr2 = nocca
+
+    allocate(sg0(nbf,nbf), wrk(nbf,nbf), &
+             m10(nbf,nbf), m9(nbf,nbf), &
+             m1aa(nbf,nbf), m1bb(nbf,nbf), m2aa(nbf,nbf), m2bb(nbf,nbf), &
+             k1aa(nbf,nbf), k1bb(nbf,nbf), k2aa(nbf,nbf), k2bb(nbf,nbf), &
+             d1(ncl), d2(ncl), v1(nvira), v2(nvira), &
+             source=0.0_dp, stat=ok)
+    if (ok /= 0) call show_message('Cannot allocate memory', with_abort)
+
+  ! Block amplitudes
+    d1(1:ncl) = xv(1:ncl,lr1)
+    d2(1:ncl) = xv(1:ncl,lr2)
+    v1(1:nvira) = xv(lr1,nocca+1:nbf)
+    v2(1:nvira) = xv(lr2,nocca+1:nbf)
+
+  ! MO sandwiches of the channel responses
+  ! (1 ado2va, 2 ado2vb, 3 ado1va, 4 ado1vb, 5 adco1a, 6 adco1b,
+  !  7 adco2a, 8 adco2b, 9 ao21v, 10 aco12, 11 agdlr)
+    call sandwich(fmrsf(1,:,:),  va, va, m2aa)
+    call sandwich(fmrsf(2,:,:),  vb, vb, m2bb)
+    call sandwich(fmrsf(3,:,:),  va, va, m1aa)
+    call sandwich(fmrsf(4,:,:),  vb, vb, m1bb)
+    call sandwich(fmrsf(5,:,:),  va, va, k1aa)
+    call sandwich(fmrsf(6,:,:),  vb, vb, k1bb)
+    call sandwich(fmrsf(7,:,:),  va, va, k2aa)
+    call sandwich(fmrsf(8,:,:),  vb, vb, k2bb)
+    call sandwich(fmrsf(9,:,:),  va, vb, m9)
+    call sandwich(fmrsf(10,:,:), va, vb, m10)
+    call sandwich(fmrsf(11,:,:), va, vb, sg0)
+
+  ! sigma0 = X*Fb - Fa*X + Ca^T*agdlr*Cb
+    call dgemm('n','n',nbf,nbf,nbf, &
+                1.0_dp, xv, nbf, &
+                        fb, nbf, &
+                1.0_dp, sg0, nbf)
+    call dgemm('n','n',nbf,nbf,nbf, &
+               -1.0_dp, fa, nbf, &
+                        xv, nbf, &
+                1.0_dp, sg0, nbf)
+
+  ! H^(0):  Ha = X * sigma0^T,  Hb = X^T * sigma0
+    call dgemm('n','t',nbf,nbf,nbf, &
+                1.0_dp, xv, nbf, &
+                        sg0, nbf, &
+                0.0_dp, ha, nbf)
+    call dgemm('t','n',nbf,nbf,nbf, &
+                1.0_dp, xv, nbf, &
+                        sg0, nbf, &
+                0.0_dp, hb, nbf)
+
+  ! Spin-pairing folds, alpha set
+    do u = 1, nbf
+    ! t in C: intra-CO + inter (a-dressed)
+      do t = 1, ncl
+        ha(t,u) = ha(t,u) &
+          + d1(t)*(-m10(u,lr2) + 0.5_dp*m2aa(u,lr1)) &
+          + d2(t)*( m10(u,lr1) + 0.5_dp*m1aa(u,lr2))
+      end do
+    ! t in O: intra-OV + inter (a-dressed)
+      ha(lr1,u) = ha(lr1,u) &
+        - dot_product(v2, m9(u,nocca+1:nbf)) &
+        + 0.5_dp*( dot_product(d1, m2aa(1:ncl,u)) &
+                 + dot_product(v1, k2aa(u,nocca+1:nbf)) )
+      ha(lr2,u) = ha(lr2,u) &
+        + dot_product(v1, m9(u,nocca+1:nbf)) &
+        + 0.5_dp*( dot_product(d2, m1aa(1:ncl,u)) &
+                 + dot_product(v2, k1aa(u,nocca+1:nbf)) )
+    ! t in V: inter (a-dressed)
+      do t = nocca+1, nbf
+        ha(t,u) = ha(t,u) &
+          + 0.5_dp*( v1(t-nocca)*k2aa(lr1,u) + v2(t-nocca)*k1aa(lr2,u) )
+      end do
+    end do
+
+  ! Spin-pairing folds, beta set
+    do u = 1, nbf
+    ! t in C: inter (b-dressed)
+      do t = 1, ncl
+        hb(t,u) = hb(t,u) &
+          + 0.5_dp*( d2(t)*m1bb(u,lr2) + d1(t)*m2bb(u,lr1) )
+      end do
+    ! t in O: intra-CO + inter (b-dressed)
+      hb(lr1,u) = hb(lr1,u) &
+        + dot_product(d2, m10(1:ncl,u)) &
+        + 0.5_dp*( dot_product(d1, m2bb(1:ncl,u)) &
+                 + dot_product(v1, k2bb(u,nocca+1:nbf)) )
+      hb(lr2,u) = hb(lr2,u) &
+        - dot_product(d1, m10(1:ncl,u)) &
+        + 0.5_dp*( dot_product(d2, m1bb(1:ncl,u)) &
+                 + dot_product(v2, k1bb(u,nocca+1:nbf)) )
+    ! t in V: intra-OV + inter (b-dressed)
+      do t = nocca+1, nbf
+        hb(t,u) = hb(t,u) &
+          - v2(t-nocca)*m9(lr1,u) + v1(t-nocca)*m9(lr2,u) &
+          + 0.5_dp*( v1(t-nocca)*k2bb(lr1,u) + v2(t-nocca)*k1bb(lr2,u) )
+      end do
+    end do
+
+    deallocate(sg0, wrk, m10, m9, m1aa, m1bb, m2aa, m2bb, &
+               k1aa, k1bb, k2aa, k2bb, d1, d2, v1, v2)
+
+    return
+
+  contains
+
+    subroutine sandwich(aochan, cl, cr, mo)
+      real(kind=dp), intent(in) :: aochan(:,:), cl(:,:), cr(:,:)
+      real(kind=dp), intent(out) :: mo(:,:)
+      call dgemm('t','n',nbf,nbf,nbf, &
+                  1.0_dp, cl, nbf, &
+                          aochan, nbf, &
+                  0.0_dp, wrk, nbf)
+      call dgemm('n','n',nbf,nbf,nbf, &
+                  1.0_dp, wrk, nbf, &
+                          cr, nbf, &
+                  0.0_dp, mo, nbf)
+    end subroutine sandwich
+
+  end subroutine umrsfqassm
+
+!###############################################################################
+
+!> @brief Assemble the UMRSF Z-vector right-hand side from the fold matrices
+!>        and report the diagnostic R blocks.
+!>
+!> @details Full antisymmetrized residuals R^sigma(t,u) = 2(H(t,u) - H(u,t))
+!>   plus the H+[T] terms in the occupied x virtual rectangle of each spin
+!>   (theory document Eq. (92); H+[T] cancels in all within-class blocks).
+!>   The coupled CPKS right-hand side is packed as two rectangles,
+!>     alpha: occ(alpha) x virt(alpha),  beta: occ(beta) x virt(beta),
+!>   with rhs = -R (Z-vector sign convention).  The within-class blocks
+!>   belong to the closed-form multipliers (Eq. (94)); the exact identities
+!>   R^a_ij + R^b_ij = 0 and R^a_ab + R^b_ab = 0 are free tests of the
+!>   spin-pairing folds and are printed here (test 2.T2).
+!>
+!> @param[out] rhs   packed coupled right-hand side, -R
+!> @param[in]  hpta  (noca, nbf-noca) H+alpha[T] occ x virt rectangle
+!> @param[in]  hptb  (nocb, nbf-nocb) H+beta[T] occ x virt rectangle
+!> @param[in]  ha,hb (nbf,nbf) fold matrices from umrsfqassm
+!> @param[out] ra,rb (nbf,nbf) full residual matrices R^alpha, R^beta
+  subroutine usfrorhs(rhs, hpta, hptb, ha, hb, ra, rb, noca, nocb)
+
+    use precision, only: dp
+    use io_constants, only: iw
+
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:) :: rhs
+    real(kind=dp), intent(in), dimension(:,:) :: hpta, hptb, ha, hb
+    real(kind=dp), intent(out), dimension(:,:) :: ra, rb
+    integer, intent(in) :: noca, nocb
+
+    integer :: nbf, i, k, ij
+    real(kind=dp) :: dev_ij, dev_ab
+
+    nbf = ubound(ha,1)
+
+  ! R(t,u) = 2(H(t,u) - H(u,t))
+    do k = 1, nbf
+      do i = 1, nbf
+        ra(i,k) = 2.0_dp*(ha(i,k)-ha(k,i))
+        rb(i,k) = 2.0_dp*(hb(i,k)-hb(k,i))
+      end do
+    end do
+
+  ! H+[T] contributes to the occupied x virtual rectangles only
+    do k = noca+1, nbf
+      do i = 1, noca
+        ra(i,k) = ra(i,k) + hpta(i,k-noca)
+        ra(k,i) = ra(k,i) - hpta(i,k-noca)
+      end do
+    end do
+    do k = nocb+1, nbf
+      do i = 1, nocb
+        rb(i,k) = rb(i,k) + hptb(i,k-nocb)
+        rb(k,i) = rb(k,i) - hptb(i,k-nocb)
+      end do
+    end do
+
+  ! Pack the coupled right-hand side: rhs = -R
+    ij = 0
+    do k = noca+1, nbf
+      do i = 1, noca
+        ij = ij+1
+        rhs(ij) = -ra(i,k)
+      end do
+    end do
+    do k = nocb+1, nbf
+      do i = 1, nocb
+        ij = ij+1
+        rhs(ij) = -rb(i,k)
+      end do
+    end do
+
+  ! Diagnostics: per-block magnitudes and the free spin-pairing identities
+    write(iw,'(/5x,a)') 'UMRSF Z-vector RHS blocks, max|R|'
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'R(a)ia =', maxval(abs(ra(1:nocb,noca+1:nbf))), &
+      'R(a)xa =', maxval(abs(ra(nocb+1:noca,noca+1:nbf)))
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'R(b)ix =', maxval(abs(rb(1:nocb,nocb+1:noca))), &
+      'R(b)ia =', maxval(abs(rb(1:nocb,noca+1:nbf)))
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'R(a)ix =', maxval(abs(ra(1:nocb,nocb+1:noca))), &
+      'R(b)xa =', maxval(abs(rb(nocb+1:noca,noca+1:nbf)))
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'R(a)xy =', maxval(abs(ra(nocb+1:noca,nocb+1:noca))), &
+      'R(b)xy =', maxval(abs(rb(nocb+1:noca,nocb+1:noca)))
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'R(a)ij =', maxval(abs(ra(1:nocb,1:nocb))), &
+      'R(b)ij =', maxval(abs(rb(1:nocb,1:nocb)))
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'R(a)ab =', maxval(abs(ra(noca+1:nbf,noca+1:nbf))), &
+      'R(b)ab =', maxval(abs(rb(noca+1:nbf,noca+1:nbf)))
+
+    dev_ij = maxval(abs(ra(1:nocb,1:nocb)+rb(1:nocb,1:nocb)))
+    dev_ab = maxval(abs(ra(noca+1:nbf,noca+1:nbf)+rb(noca+1:nbf,noca+1:nbf)))
+    write(iw,'(5x,a)') 'Spin-pairing fold identities (must vanish):'
+    write(iw,'(5x,a,1p,e12.4,3x,a,e12.4)') &
+      'max|R(a)ij+R(b)ij| =', dev_ij, &
+      'max|R(a)ab+R(b)ab| =', dev_ab
+    call flush(iw)
+
+    return
+
+  end subroutine usfrorhs
 
 end module tdhf_mrsf_lib
 
