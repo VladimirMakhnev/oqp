@@ -74,6 +74,32 @@ contains
     end if
   end function umrsf_intscale
 
+  function umrsf_db1scale() result(s)
+    real(kind=dp) :: s
+    character(len=32) :: env
+    integer :: ios
+    real(kind=dp) :: v
+    s = 1.0_dp
+    call get_environment_variable('OQP_UMRSF_DB1', env)
+    if (len_trim(env) > 0) then
+      read(env, *, iostat=ios) v
+      if (ios == 0) s = v
+    end if
+  end function umrsf_db1scale
+
+  function umrsf_db2scale() result(s)
+    real(kind=dp) :: s
+    character(len=32) :: env
+    integer :: ios
+    real(kind=dp) :: v
+    s = 1.0_dp
+    call get_environment_variable('OQP_UMRSF_DB2', env)
+    if (len_trim(env) > 0) then
+      read(env, *, iostat=ios) v
+      if (ios == 0) s = v
+    end if
+  end function umrsf_db2scale
+
   function umrsf_intdd() result(s)
     real(kind=dp) :: s
     character(len=32) :: env
@@ -797,7 +823,7 @@ contains
                    + co12(k1,j1)*co12(i1,l1) &
                    + co12(l1,i1)*co12(j1,k1) &
                    + co12(k1,i1)*co12(j1,l1)
-              df1 = df1 + sgnk*qfspcp1*db1
+              df1 = df1 + sgnk*qfspcp1*umrsf_db1scale()*db1
             end if
 
             ! Intra OV (o21v, mixed set) -- exchange paired
@@ -810,7 +836,7 @@ contains
                    + o21v(k1,j1)*o21v(i1,l1) &
                    + o21v(l1,i1)*o21v(j1,k1) &
                    + o21v(k1,i1)*o21v(j1,l1)
-              df1 = df1 + sgnk*qfspcp2*db2
+              df1 = df1 + sgnk*qfspcp2*umrsf_db2scale()*db2
             end if
 
             ! Inter: 1/2 (alpha + beta) of (2 direct - exchange); each spin
