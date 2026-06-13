@@ -3601,19 +3601,20 @@ contains
     zma = 0.0_dp
     zmb = 0.0_dp
 
+    ! One-sided occ->virt placement (matching the RO sfrogen convention):
+    ! int2_tdgrd produces the symmetrized (A+B) response from a one-sided
+    ! density, so a pre-symmetrized input would halve the exchange.
     ij = 0
     do k = noca+1, nbf
       do i = 1, noca
         ij = ij+1
-        zma(i,k) = 0.5_dp*zv(ij)
-        zma(k,i) = zma(i,k)
+        zma(i,k) = zv(ij)
       end do
     end do
     do k = nocb+1, nbf
       do i = 1, nocb
         ij = ij+1
-        zmb(i,k) = 0.5_dp*zv(ij)
-        zmb(k,i) = zmb(i,k)
+        zmb(i,k) = zv(ij)
       end do
     end do
 

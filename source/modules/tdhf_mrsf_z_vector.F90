@@ -1994,23 +1994,11 @@ contains
                source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
 
-    ! H+[Z_total] (trivial + coupled blocks, 1/2 pair-density convention)
-      call dgemm('n','n',nbf,nbf,nbf, &
-                  0.5_dp, mo_a, nbf, &
-                          z_al, nbf, &
-                  0.0_dp, scr, nbf)
-      call dgemm('n','t',nbf,nbf,nbf, &
-                  1.0_dp, scr, nbf, &
-                          mo_a, nbf, &
-                  0.0_dp, pa(:,:,1), nbf)
-      call dgemm('n','n',nbf,nbf,nbf, &
-                  0.5_dp, mo_b, nbf, &
-                          z_be, nbf, &
-                  0.0_dp, scr, nbf)
-      call dgemm('n','t',nbf,nbf,nbf, &
-                  1.0_dp, scr, nbf, &
-                          mo_b, nbf, &
-                  0.0_dp, pa(:,:,2), nbf)
+    ! H+[Z_total]: one-sided density C*triu(Z)*C^T (full multiplier), the
+    ! same convention as the CPKS operator (usfrogen) so int2_tdgrd produces
+    ! the correct symmetrized exchange
+      call make_oneside_ao(z_al, mo_a, pa(:,:,1))
+      call make_oneside_ao(z_be, mo_b, pa(:,:,2))
 
       if (allocated(int2_data)) call int2_data%clean()
       int2_data = int2_tdgrd_data_t( &
@@ -2161,9 +2149,32 @@ contains
 
     end subroutine build_umrsf_p_and_w
 
-    !> Symmetric energy-weighted W^sigma (MO), generic form
-    !> W_pq = Q_pq + eps_q Z_pq + [p in occ] H+_pq[Z] (p<q), unhalved
-    !> diagonal Q_tt + [t in occ] H+_tt[Z].  occ(sigma) = 1..noca_s.
+    !> One-sided AO density D = C * triu(Z) * C^T from a symmetric MO
+    !> multiplier matrix (strict upper triangle = one multiplier per pair).
+    !> This is the density convention the CPKS operator (usfrogen) feeds to
+    !> int2_tdgrd, which then produces the correctly symmetrized exchange.
+    subroutine make_oneside_ao(zmat, cmo, dao)
+      real(kind=dp), intent(in), dimension(:,:) :: zmat, cmo
+      real(kind=dp), intent(out), dimension(:,:) :: dao
+      real(kind=dp), allocatable :: tri(:,:), tmp(:,:)
+      integer :: p, q
+      allocate(tri(nbf,nbf), tmp(nbf,nbf), source=0.0_dp)
+      do q = 1, nbf
+        do p = 1, q-1
+          tri(p,q) = zmat(p,q)
+        end do
+      end do
+      call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, cmo, nbf, tri, nbf, 0.0_dp, tmp, nbf)
+      call dgemm('n','t',nbf,nbf,nbf, 1.0_dp, tmp, nbf, cmo, nbf, 0.0_dp, dao, nbf)
+      deallocate(tri, tmp)
+    end subroutine make_oneside_ao
+
+    !> Symmetric energy-weighted W^sigma (MO) per Eq. (96), block form.
+    !> Classes: C=1..nocb, O=nocb+1..noca, V=noca+1..nbf; occ(sigma)=1..noca_s.
+    !> Occupied-side blocks (ij/ix/xy, q<=noca): W = Q_pq + eps_q Z_pq +
+    !> [p in occ] H+_pq[Z].  Virtual-touching blocks (ia/xa/ab, q in V): the
+    !> transposed fold and the lower-index orbital energy, no H+[Z].
+    !> Diagonal: 2 W_tt = Q_tt + [t in occ] H+_tt[Z].
     subroutine build_w_generic(qq, ff, hz, zz, noca_s, w)
       real(kind=dp), intent(in), dimension(:,:) :: qq, ff, hz, zz
       integer, intent(in) :: noca_s
@@ -2177,8 +2188,15 @@ contains
         if (q <= noca_s) val = val + hzs*hz(q,q)
         w(q,q) = val
         do p = 1, q-1
-          val = qq(p,q) + ff(q,q)*zz(p,q)
-          if (p <= noca_s) val = val + hzs*hz(p,q)
+          if (q > nocca) then
+            ! q in V: ia/xa (p in occ) or ab (p in V) -> transposed fold,
+            ! lower-index energy, no H+[Z]
+            val = qq(q,p) + ff(p,p)*zz(p,q)
+          else
+            ! occupied-side block ij/ix/xy
+            val = qq(p,q) + ff(q,q)*zz(p,q)
+            if (p <= noca_s) val = val + hzs*hz(p,q)
+          end if
           w(p,q) = val
           w(q,p) = val
         end do
@@ -2710,26 +2728,11 @@ contains
     ! Z_triv by division (za/zb symmetric, zero diagonal; monitored)
       call usfztriv(infos, r_al, r_be, fa, fb, z_al, z_be, nocca, noccb)
 
-    ! AO perturbation densities D^sigma = 1/2 * C * Z * C^T: the multipliers
-    ! are per unordered pair (L = sum_{p<q} Z_pq F_pq = 1/2 Tr[Z F]), so the
-    ! potential-response density carries 1/2 relative to a full-matrix
-    ! argument like T (convention fixed by the FD test fd_ztriv_test.py)
-      call dgemm('n','n',nbf,nbf,nbf, &
-                  0.5_dp, mo_a, nbf, &
-                          z_al, nbf, &
-                  0.0_dp, wrk2, nbf)
-      call dgemm('n','t',nbf,nbf,nbf, &
-                  1.0_dp, wrk2, nbf, &
-                          mo_a, nbf, &
-                  0.0_dp, pa(:,:,1), nbf)
-      call dgemm('n','n',nbf,nbf,nbf, &
-                  0.5_dp, mo_b, nbf, &
-                          z_be, nbf, &
-                  0.0_dp, wrk2, nbf)
-      call dgemm('n','t',nbf,nbf,nbf, &
-                  1.0_dp, wrk2, nbf, &
-                          mo_b, nbf, &
-                  0.0_dp, pa(:,:,2), nbf)
+    ! H+[Z_triv]: one-sided density C*triu(Z)*C^T (full multiplier), the
+    ! same convention as the CPKS operator so the response that is moved to
+    ! the coupled right-hand side matches the operator's H+ exactly
+      call make_oneside_ao(z_al, mo_a, pa(:,:,1))
+      call make_oneside_ao(z_be, mo_b, pa(:,:,2))
 
     ! H+[Z_triv]: same response machinery as H+[T]
       if (allocated(int2_data)) call int2_data%clean()

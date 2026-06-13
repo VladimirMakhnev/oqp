@@ -44,6 +44,21 @@ module tdhf_mrsf_gradient_mod
 
 contains
 
+  !> Development knob: scale the UMRSF transition-density XX (ball) exchange
+  !> term for finite-difference calibration (OQP_UMRSF_XXSCALE, default 1).
+  function umrsf_xxscale() result(s)
+    real(kind=dp) :: s
+    character(len=32) :: env
+    integer :: ios
+    real(kind=dp) :: v
+    s = 1.0_dp
+    call get_environment_variable('OQP_UMRSF_XXSCALE', env)
+    if (len_trim(env) > 0) then
+      read(env, *, iostat=ios) v
+      if (ios == 0) s = v
+    end if
+  end function umrsf_xxscale
+
   subroutine tdhf_mrsf_gradient_C(c_handle) bind(C, name="tdhf_mrsf_gradient")
     use c_interop, only: oqp_handle_t, oqp_handle_get_info
     use types, only: information
@@ -728,7 +743,7 @@ contains
                   + ball(k1,i1)*ball(l1,j1) &
                   + ball(i1,l1)*ball(j1,k1) &
                   + ball(l1,i1)*ball(k1,j1)
-              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*dt2
+              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*umrsf_xxscale()*dt2
             end if
 
             ! Intra CO (co12, mixed set) -- exchange paired
