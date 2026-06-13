@@ -2183,22 +2183,25 @@ contains
       end do
     end subroutine p_drop_withinclass
 
-    !> Diagnostic: scale the C-C (1..nocb) and V-V (noca+1..nbf) blocks of a
-    !> multiplier matrix by OQP_UMRSF_WCSCALE (the c_int-driven within-class
-    !> multipliers), to localize a within-class factor error.
+    !> Diagnostic: scale the SAME-CLASS within-class blocks (C-C, O-O, V-V;
+    !> classes C=1..nocb, O=nocb+1..noca, V=noca+1..nbf) of a multiplier
+    !> matrix by OQP_UMRSF_WCSCALE.  These are the pure-gauge within-class
+    !> rotations; the off-class blocks (C-O, C-V, O-V = canonicalization /
+    !> coupled) are left untouched.
     subroutine scale_ccvv(z)
       real(kind=dp), intent(inout) :: z(:,:)
       character(len=16) :: env
-      integer :: p, q, ios
+      integer :: p, q, ios, cp, cq
       real(kind=dp) :: s
       call get_environment_variable('OQP_UMRSF_WCSCALE', env)
       if (len_trim(env) == 0) return
       read(env, *, iostat=ios) s
       if (ios /= 0) return
       do q = 1, nbf
+        cq = merge(1, merge(2, 3, q <= nocca), q <= noccb)  ! 1=C,2=O,3=V
         do p = 1, nbf
-          if ((p <= noccb .and. q <= noccb) .or. &
-              (p > nocca .and. q > nocca)) z(p,q) = s*z(p,q)
+          cp = merge(1, merge(2, 3, p <= nocca), p <= noccb)
+          if (cp == cq) z(p,q) = s*z(p,q)   ! same-class block
         end do
       end do
     end subroutine scale_ccvv
@@ -2646,16 +2649,32 @@ contains
     ! drop these couplings.  Flagged here for the non-canonical treatment.
       block
         integer :: ii, jj
-        real(kind=dp) :: f_co
-        f_co = 0.0_dp
+        real(kind=dp) :: f_co, f_ov_b, f_oo_b, f_vv_b
+        f_co = 0.0_dp; f_ov_b = 0.0_dp; f_oo_b = 0.0_dp; f_vv_b = 0.0_dp
         do jj = noccb+1, nocca      ! O (SOMO)
           do ii = 1, noccb          ! C (core)
             f_co = max(f_co, abs(fa(ii,jj)))
           end do
         end do
-        if (f_co > 1.0e-6_dp) write(iw,'(5x,a,1p,e12.4,a)') &
-          'WARNING: non-canonical alpha C-O Fock coupling =', f_co, &
-          ' (gradient assumes canonical UKS; see implementation_plan phase 6)'
+        ! beta virtual block (O union V) off-diagonal: O-V, O-O, V-V of Fb
+        do jj = nocca+1, nbf        ! V
+          do ii = noccb+1, nocca    ! O
+            f_ov_b = max(f_ov_b, abs(fb(ii,jj)))
+          end do
+        end do
+        do jj = noccb+1, nocca
+          do ii = noccb+1, nocca
+            if (ii /= jj) f_oo_b = max(f_oo_b, abs(fb(ii,jj)))
+          end do
+        end do
+        do jj = nocca+1, nbf
+          do ii = nocca+1, nbf
+            if (ii /= jj) f_vv_b = max(f_vv_b, abs(fb(ii,jj)))
+          end do
+        end do
+        write(iw,'(5x,a,1p,4(a,e11.3))') 'Reference non-canonicality:', &
+          ' Fa(C-O)=', f_co, ' Fb(O-V)=', f_ov_b, &
+          ' Fb(O-O)=', f_oo_b, ' Fb(V-V)=', f_vv_b
         call flush(iw)
       end block
 
