@@ -2580,6 +2580,26 @@ contains
       call orthogonal_transform_sym(nbf, nbf, fock_b, mo_b, nbf, wrk1)
       call unpack_matrix(wrk1t, fb)
 
+    ! Non-canonical reference check.  The MRSF SOMO ordering leaves the
+    ! stored orbitals non-canonical within the occupied space (the C-O,
+    ! core-SOMO, alpha Fock coupling in particular); the canonical-basis
+    ! gradient formulas (closed-form within-class multipliers, eps_q Z in W)
+    ! drop these couplings.  Flagged here for the non-canonical treatment.
+      block
+        integer :: ii, jj
+        real(kind=dp) :: f_co
+        f_co = 0.0_dp
+        do jj = noccb+1, nocca      ! O (SOMO)
+          do ii = 1, noccb          ! C (core)
+            f_co = max(f_co, abs(fa(ii,jj)))
+          end do
+        end do
+        if (f_co > 1.0e-6_dp) write(iw,'(5x,a,1p,e12.4,a)') &
+          'WARNING: non-canonical alpha C-O Fock coupling =', f_co, &
+          ' (gradient assumes canonical UKS; see implementation_plan phase 6)'
+        call flush(iw)
+      end block
+
     ! Unrelaxed difference densities (AO, from umrsfdmat)
       call unpack_matrix(ta, pa(:,:,1))
       call unpack_matrix(tb, pa(:,:,2))
