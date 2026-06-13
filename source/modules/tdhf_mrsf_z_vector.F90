@@ -2067,6 +2067,21 @@ contains
       qa(1:nocca,:) = qa(1:nocca,:) + hpt_a(1:nocca,:)
       qb(1:noccb,:) = qb(1:noccb,:) + hpt_b(1:noccb,:)
 
+    ! Development: overwrite the H tags with Q/2 so the single-sided FD test
+    ! (fd_fold_test.py --mode q) compares dG/de against the FULL fold Q
+    ! (= 2H + 2F[X,X] + H+[T]), not the bare H[X,X].
+      block
+        real(kind=dp), contiguous, pointer :: h_al(:,:), h_be(:,:)
+        integer(4) :: tagid
+        if (infos%dat%has_records((/ character(len=80) :: &
+              OQP_umrsf_h_alpha, OQP_umrsf_h_beta /), tagid) == TA_OK) then
+          call tagarray_get_data(infos%dat, OQP_umrsf_h_alpha, h_al)
+          call tagarray_get_data(infos%dat, OQP_umrsf_h_beta, h_be)
+          h_al = 0.5_dp*qa
+          h_be = 0.5_dp*qb
+        end if
+      end block
+
     ! Consistency (5.T2): both W forms on the coupled blocks agree iff the
     ! Z equations are solved: max |(Q_pq + eps_q Z + H+_pq[Z]) - (Q_qp + eps_p Z)|
       dev_w = 0.0_dp
@@ -2111,8 +2126,9 @@ contains
 
     ! Relaxed densities: the one-particle response cofactor is
     ! P^sigma = T^sigma + 1/2 Z^sigma (pair-multiplier 1/2, same as in the
-    ! H+ feedback; full-matrix T carries no factor)
-      pmo = 0.5_dp*z_al
+    ! H+ feedback; full-matrix T carries no factor).  The Z scale is
+    ! env-overridable (OQP_UMRSF_PSCALE) for finite-difference calibration.
+      pmo = umrsf_pscale()*z_al
       call dgemm('n','t',nbf,nbf,nbf, &
                  -1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2124,7 +2140,7 @@ contains
       call orthogonal_transform('t', nbf, mo_a, pmo, scr, wrk2)
       call pack_matrix(scr, td_p(:,1))
 
-      pmo = 0.5_dp*z_be
+      pmo = umrsf_pscale()*z_be
       call dgemm('t','n',nbf,nbf,nbf, &
                   1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2153,15 +2169,16 @@ contains
       integer, intent(in) :: noca_s
       real(kind=dp), intent(out), dimension(:,:) :: w
       integer :: p, q
-      real(kind=dp) :: val
+      real(kind=dp) :: val, hzs
+      hzs = umrsf_hzscale()
       w = 0.0_dp
       do q = 1, nbf
         val = qq(q,q)
-        if (q <= noca_s) val = val + hz(q,q)
+        if (q <= noca_s) val = val + hzs*hz(q,q)
         w(q,q) = val
         do p = 1, q-1
           val = qq(p,q) + ff(q,q)*zz(p,q)
-          if (p <= noca_s) val = val + hz(p,q)
+          if (p <= noca_s) val = val + hzs*hz(p,q)
           w(p,q) = val
           w(q,p) = val
         end do
@@ -2184,6 +2201,32 @@ contains
         if (ios == 0) s = v
       end if
     end function umrsf_wscale
+
+    function umrsf_pscale() result(s)
+      real(kind=dp) :: s
+      character(len=32) :: env
+      integer :: ios
+      real(kind=dp) :: v
+      s = 0.5_dp
+      call get_environment_variable('OQP_UMRSF_PSCALE', env)
+      if (len_trim(env) > 0) then
+        read(env, *, iostat=ios) v
+        if (ios == 0) s = v
+      end if
+    end function umrsf_pscale
+
+    function umrsf_hzscale() result(s)
+      real(kind=dp) :: s
+      character(len=32) :: env
+      integer :: ios
+      real(kind=dp) :: v
+      s = 1.0_dp
+      call get_environment_variable('OQP_UMRSF_HZSCALE', env)
+      if (len_trim(env) > 0) then
+        read(env, *, iostat=ios) v
+        if (ios == 0) s = v
+      end if
+    end function umrsf_hzscale
 
     ! Lambda wrapper for preconditioner
     subroutine lambda_precond(x_in, x_out)
