@@ -3474,27 +3474,26 @@ contains
 
 !###############################################################################
 
-!> @brief Closed-form within-class multipliers of the UMRSF Z-vector
-!>        (theory document Eq. (94)).
+!> @brief Within-class multipliers of the UMRSF Z-vector for a possibly
+!>        NON-canonical reference (theory document Eq. (94), generalized).
 !>
-!> @details For all within-class rotations (alpha: C-C, C-O, O-O, V-V;
-!>   beta: C-C, O-V, O-O, V-V) the CPKS feedback cancels in the
-!>   antisymmetrized stationarity condition, leaving diagonal equations
-!>     Z_pq = -R_pq / (eps_q - eps_p),  p < q.
-!>   za/zb are returned symmetric (the pair value at both orderings) with
-!>   zero diagonal, so the AO perturbation density for H+[Z_triv] is simply
-!>   C * Z * C^T.  Near-degenerate denominators are floored and flagged
-!>   (canonical-gauge singularity; see the degeneracy remark in the theory
-!>   document) - for sound states R_pq vanishes faster than the gap.
+!> @details The MRSF SOMO ordering leaves the orbitals non-canonical within
+!>   the occupied space, so the within-class equation is the commutator
+!>     [Z, F] = -R     (Z symmetric, R antisymmetric)
+!>   solved here over each spin's full occupied and virtual Fock sub-block by
+!>   diagonalizing F: in the eigenbasis Z'_mn = -R'_mn/(e_n - e_m), which
+!>   reduces to Z_pq = -R_pq/(eps_q - eps_p) when F is already diagonal.
+!>   Occupied and virtual blocks are decoupled by Brillouin (F_occ-virt = 0).
 !>
 !> @param[in]  ra,rb (nbf,nbf) antisymmetric residual matrices R^sigma
-!> @param[in]  fa,fb full MO Fock matrices (diagonals = orbital energies)
-!> @param[out] za,zb (nbf,nbf) symmetric multiplier matrices, trivial blocks
+!> @param[in]  fa,fb full MO Fock matrices (sub-blocks may be non-diagonal)
+!> @param[out] za,zb (nbf,nbf) symmetric multiplier matrices, within-class
   subroutine usfztriv(infos, ra, rb, fa, fb, za, zb, noca, nocb)
 
     use precision, only: dp
     use types, only: information
     use io_constants, only: iw
+    use messages, only: show_message, with_abort
 
     implicit none
 
@@ -3503,74 +3502,76 @@ contains
     real(kind=dp), intent(out), dimension(:,:) :: za, zb
     integer, intent(in) :: noca, nocb
 
-    real(kind=dp), parameter :: denom_floor = 1.0e-6_dp
-    real(kind=dp), parameter :: ratio_warn = 1.0e+2_dp
-    integer :: nbf, nfloor
-    real(kind=dp) :: zmax_blk(8), worst_ratio
+    integer :: nbf
+    real(kind=dp) :: zmax_oa, zmax_va, zmax_ob, zmax_vb
 
     nbf = ubound(fa,1)
     za = 0.0_dp
     zb = 0.0_dp
-    nfloor = 0
-    worst_ratio = 0.0_dp
 
-  ! alpha: ij (C-C), ix (C-O), xy (O-O), ab (V-V)
-    call fill_block(za, ra, fa, 1, nocb, 1, nocb, zmax_blk(1))
-    call fill_block(za, ra, fa, 1, nocb, nocb+1, noca, zmax_blk(2))
-    call fill_block(za, ra, fa, nocb+1, noca, nocb+1, noca, zmax_blk(3))
-    call fill_block(za, ra, fa, noca+1, nbf, noca+1, nbf, zmax_blk(4))
-  ! beta: ij (C-C), xa (O-V), xy (O-O), ab (V-V)
-    call fill_block(zb, rb, fb, 1, nocb, 1, nocb, zmax_blk(5))
-    call fill_block(zb, rb, fb, nocb+1, noca, noca+1, nbf, zmax_blk(6))
-    call fill_block(zb, rb, fb, nocb+1, noca, nocb+1, noca, zmax_blk(7))
-    call fill_block(zb, rb, fb, noca+1, nbf, noca+1, nbf, zmax_blk(8))
+  ! alpha: occupied block (C union O) and virtual block
+    call solve_commutator_block(za, ra, fa, 1, noca, zmax_oa)
+    call solve_commutator_block(za, ra, fa, noca+1, nbf, zmax_va)
+  ! beta: occupied block (C) and virtual block (O union V)
+    call solve_commutator_block(zb, rb, fb, 1, nocb, zmax_ob)
+    call solve_commutator_block(zb, rb, fb, nocb+1, nbf, zmax_vb)
 
-    write(iw,'(/5x,a)') 'UMRSF closed-form multipliers, max|Z|'
+    write(iw,'(/5x,a)') 'UMRSF within-class multipliers (non-canonical), max|Z|'
     write(iw,'(5x,4(a,1p,e12.4,3x))') &
-      'Z(a)ij =', zmax_blk(1), 'Z(a)ix =', zmax_blk(2), &
-      'Z(a)xy =', zmax_blk(3), 'Z(a)ab =', zmax_blk(4)
-    write(iw,'(5x,4(a,1p,e12.4,3x))') &
-      'Z(b)ij =', zmax_blk(5), 'Z(b)xa =', zmax_blk(6), &
-      'Z(b)xy =', zmax_blk(7), 'Z(b)ab =', zmax_blk(8)
-    if (nfloor > 0) then
-      write(iw,'(5x,a,i6,a,1p,e10.2,a)') 'WARNING:', nfloor, &
-        ' within-class denominators below the floor (', denom_floor, ')'
-    end if
-    if (worst_ratio > ratio_warn) then
-      write(iw,'(5x,a,1p,e12.4)') &
-        'WARNING: large multiplier |R|/|d_eps|, worst =', worst_ratio
-    end if
+      'Z(a)occ =', zmax_oa, 'Z(a)virt =', zmax_va, &
+      'Z(b)occ =', zmax_ob, 'Z(b)virt =', zmax_vb
     call flush(iw)
 
     return
 
   contains
 
-    subroutine fill_block(z, r, f, p1, p2, q1, q2, zmax)
+    !> Solve [Z,F] = -R within the index block [b1,b2] by diagonalizing the
+    !> Fock sub-block; result is symmetric, written into z(b1:b2,b1:b2).
+    subroutine solve_commutator_block(z, r, f, b1, b2, zmax)
       real(kind=dp), intent(inout) :: z(:,:)
       real(kind=dp), intent(in) :: r(:,:), f(:,:)
-      integer, intent(in) :: p1, p2, q1, q2
+      integer, intent(in) :: b1, b2
       real(kind=dp), intent(out) :: zmax
-      integer :: p, q, ptop
-      real(kind=dp) :: denom, zval
+      real(kind=dp), parameter :: denom_floor = 1.0e-6_dp
+      real(kind=dp), allocatable :: fsub(:,:), rsub(:,:), evec(:,:), &
+        eval(:), tmp(:,:), zp(:,:), work(:)
+      integer :: n, p, q, info, lwork
+      real(kind=dp) :: denom
+      n = b2 - b1 + 1
       zmax = 0.0_dp
-      do q = q1, q2
-        ptop = p2
-        if (q1 == p1) ptop = min(p2, q-1)   ! same-class block: p < q
-        do p = p1, ptop
-          denom = f(q,q) - f(p,p)
-          if (abs(denom) < denom_floor) then
-            nfloor = nfloor + 1
-            denom = sign(denom_floor, denom)
-          end if
-          zval = -r(p,q)/denom
-          worst_ratio = max(worst_ratio, abs(zval))
-          z(p,q) = zval
-          z(q,p) = zval
-          zmax = max(zmax, abs(zval))
+      if (n < 2) return
+      allocate(fsub(n,n), rsub(n,n), evec(n,n), eval(n), tmp(n,n), zp(n,n))
+      fsub = f(b1:b2, b1:b2)
+      rsub = r(b1:b2, b1:b2)
+      ! antisymmetrize R (numerical hygiene)
+      rsub = 0.5_dp*(rsub - transpose(rsub))
+      ! diagonalize the (symmetric) Fock sub-block
+      evec = fsub
+      lwork = max(1, 3*n)
+      allocate(work(lwork))
+      call dsyev('V', 'U', n, evec, n, eval, work, lwork, info)
+      if (info /= 0) call show_message('usfztriv: dsyev failed', with_abort)
+      ! R' = evec^T R evec
+      call dgemm('t','n', n, n, n, 1.0_dp, evec, n, rsub, n, 0.0_dp, tmp, n)
+      call dgemm('n','n', n, n, n, 1.0_dp, tmp, n, evec, n, 0.0_dp, rsub, n)
+      ! Z'_mn = -R'_mn/(e_n - e_m)
+      zp = 0.0_dp
+      do q = 1, n
+        do p = 1, n
+          if (p == q) cycle
+          denom = eval(q) - eval(p)
+          if (abs(denom) < denom_floor) denom = sign(denom_floor, denom)
+          zp(p,q) = -rsub(p,q)/denom
         end do
       end do
-    end subroutine fill_block
+      ! Z = evec Z' evec^T
+      call dgemm('n','n', n, n, n, 1.0_dp, evec, n, zp, n, 0.0_dp, tmp, n)
+      call dgemm('n','t', n, n, n, 1.0_dp, tmp, n, evec, n, 0.0_dp, zp, n)
+      z(b1:b2, b1:b2) = zp
+      zmax = maxval(abs(zp))
+      deallocate(fsub, rsub, evec, eval, tmp, zp, work)
+    end subroutine solve_commutator_block
 
   end subroutine usfztriv
 
@@ -3622,15 +3623,17 @@ contains
 
 !###############################################################################
 
-!> @brief UMRSF coupled CPKS left-hand side:
-!>        lhs = (eps_virt - eps_occ) * z + H+ rectangles.
+!> @brief UMRSF coupled CPKS left-hand side (non-canonical reference):
+!>        lhs_ia = (Z F^virt)_ia - (F^occ Z)_ia + H+_ia[Z].
 !>
-!> @details Canonical UKS: no Fock inter-block cross couplings (unlike the
-!>   ROHF J-tilde of the RO path); the orbital energies are taken from the
-!>   full MO Fock diagonals of each spin.
+!> @details The stored MRSF orbitals are non-canonical within the occupied
+!>   space (the SOMO Jacobi rotation leaves a core-SOMO Fock coupling), so
+!>   the operator uses the full Fock sub-blocks rather than the diagonal.
+!>   In a canonical basis this reduces to (eps_a - eps_i) Z_ia.
   subroutine usfrolhs(lhs, zv, fa, fb, hpa, hpb, noca, nocb)
 
     use precision, only: dp
+    use oqp_linalg
 
     implicit none
 
@@ -3639,23 +3642,45 @@ contains
     real(kind=dp), intent(in), dimension(:,:) :: fa, fb, hpa, hpb
     integer, intent(in) :: noca, nocb
 
-    integer :: i, k, ij, nbf
+    integer :: nbf
 
     nbf = ubound(fa, 1)
 
-    ij = 0
-    do k = noca+1, nbf
-      do i = 1, noca
-        ij = ij+1
-        lhs(ij) = (fa(k,k)-fa(i,i))*zv(ij) + hpa(i,k-noca)
+    call lhs_spin(zv, 0, fa, hpa, noca, nbf)
+    call lhs_spin(zv, noca*(nbf-noca), fb, hpb, nocb, nbf)
+
+  contains
+
+    subroutine lhs_spin(zvec, off, ff, hp, no, nb)
+      real(kind=dp), intent(in) :: zvec(:), ff(:,:), hp(:,:)
+      integer, intent(in) :: off, no, nb
+      real(kind=dp), allocatable :: zm(:,:), t1(:,:), t2(:,:), foo(:,:), fvv(:,:)
+      integer :: i, k, ij, nv
+      nv = nb-no
+      allocate(zm(no,nv), t1(no,nv), t2(no,nv), source=0.0_dp)
+      allocate(foo(no,no), fvv(nv,nv))
+      foo = ff(1:no,1:no)
+      fvv = ff(no+1:nb,no+1:nb)
+      ij = 0
+      do k = 1, nv
+        do i = 1, no
+          ij = ij+1
+          zm(i,k) = zvec(off+ij)
+        end do
       end do
-    end do
-    do k = nocb+1, nbf
-      do i = 1, nocb
-        ij = ij+1
-        lhs(ij) = (fb(k,k)-fb(i,i))*zv(ij) + hpb(i,k-nocb)
+      ! t1 = Z * F^virt : t1(i,a) = sum_b Z(i,b) F(no+b,no+a)
+      call dgemm('n','n', no, nv, nv, 1.0_dp, zm, no, fvv, nv, 0.0_dp, t1, no)
+      ! t2 = F^occ * Z : t2(i,a) = sum_j F(i,j) Z(j,a)
+      call dgemm('n','n', no, nv, no, 1.0_dp, foo, no, zm, no, 0.0_dp, t2, no)
+      ij = 0
+      do k = 1, nv
+        do i = 1, no
+          ij = ij+1
+          lhs(off+ij) = t1(i,k) - t2(i,k) + hp(i,k)
+        end do
       end do
-    end do
+      deallocate(zm, t1, t2, foo, fvv)
+    end subroutine lhs_spin
 
   end subroutine usfrolhs
 

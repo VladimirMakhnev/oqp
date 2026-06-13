@@ -1985,12 +1985,13 @@ contains
     subroutine build_umrsf_p_and_w()
 
       real(kind=dp), allocatable :: qa(:,:), qb(:,:), hza(:,:), hzb(:,:), &
-        wmo(:,:), pmo(:,:), xv(:,:), scr(:,:)
+        wmo(:,:), pmo(:,:), xv(:,:), scr(:,:), hza_zf(:,:), hza_fz(:,:)
       integer :: p, q, ok_u
       real(kind=dp) :: tra, trb, dev_w
 
       allocate(qa(nbf,nbf), qb(nbf,nbf), hza(nbf,nbf), hzb(nbf,nbf), &
                wmo(nbf,nbf), pmo(nbf,nbf), xv(nbf,nbf), scr(nbf,nbf), &
+               hza_zf(nbf,nbf), hza_fz(nbf,nbf), &
                source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
 
@@ -2088,12 +2089,15 @@ contains
       write(iw,'(5x,a,1p,e12.4)') &
         'W-form equivalence on coupled blocks (solver residual level) =', dev_w
 
-    ! Energy-weighted W (symmetric energy-weighted density).  The generic
-    ! form W_pq = Q_pq + eps_q Z_pq + [p in occ] H+_pq[Z] is one of the two
-    ! equivalent forms of Eq. (96) (equal by the corresponding Z equation);
-    ! it is built symmetric and added as the grd1 S-derivative cofactor
-    ! (dens = eijden + 2*wao), with the AO diagonal halved.
-      call build_w_generic(qa, fa, hza, z_al, nocca, wmo)
+    ! Energy-weighted W (symmetric energy-weighted density), non-canonical:
+    ! the Fock term is the full matrix product (Z F) on the occupied-side
+    ! blocks and (F Z) on the virtual-touching blocks, generalizing eps_q Z
+    ! to a non-diagonal reference Fock.  Built symmetric and added as the
+    ! grd1 S-derivative cofactor (dens = eijden + 2*wao), AO diagonal halved.
+    ! zf = Z F, fz = F Z (precomputed in the scratch matrices).
+      call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, z_al, nbf, fa, nbf, 0.0_dp, hza_zf, nbf)
+      call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, fa, nbf, z_al, nbf, 0.0_dp, hza_fz, nbf)
+      call build_w_generic(qa, hza_zf, hza_fz, hza, nocca, wmo)
       call orthogonal_transform('t', nbf, mo_a, wmo, scr, xv)
       scr = umrsf_wscale()*scr
       do p = 1, nbf
@@ -2101,7 +2105,9 @@ contains
       end do
       call pack_matrix(scr, wao)
 
-      call build_w_generic(qb, fb, hzb, z_be, noccb, wmo)
+      call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, z_be, nbf, fb, nbf, 0.0_dp, hza_zf, nbf)
+      call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, fb, nbf, z_be, nbf, 0.0_dp, hza_fz, nbf)
+      call build_w_generic(qb, hza_zf, hza_fz, hzb, noccb, wmo)
       call orthogonal_transform('t', nbf, mo_b, wmo, scr, xv)
       scr = umrsf_wscale()*scr
       do p = 1, nbf
@@ -2169,14 +2175,16 @@ contains
       deallocate(tri, tmp)
     end subroutine make_oneside_ao
 
-    !> Symmetric energy-weighted W^sigma (MO) per Eq. (96), block form.
-    !> Classes: C=1..nocb, O=nocb+1..noca, V=noca+1..nbf; occ(sigma)=1..noca_s.
-    !> Occupied-side blocks (ij/ix/xy, q<=noca): W = Q_pq + eps_q Z_pq +
-    !> [p in occ] H+_pq[Z].  Virtual-touching blocks (ia/xa/ab, q in V): the
-    !> transposed fold and the lower-index orbital energy, no H+[Z].
-    !> Diagonal: 2 W_tt = Q_tt + [t in occ] H+_tt[Z].
-    subroutine build_w_generic(qq, ff, hz, zz, noca_s, w)
-      real(kind=dp), intent(in), dimension(:,:) :: qq, ff, hz, zz
+    !> Symmetric energy-weighted W^sigma (MO) per Eq. (96), block form, for a
+    !> possibly non-canonical reference.  Classes: C=1..nocb, O=nocb+1..noca,
+    !> V=noca+1..nbf; occ(sigma)=1..noca_s.  Occupied-side blocks (ij/ix/xy,
+    !> q<=noca): W = Q_pq + (Z F)_pq + [p in occ] H+_pq[Z].  Virtual-touching
+    !> blocks (ia/xa/ab, q in V): the transposed fold and (F Z)_pq, no H+[Z].
+    !> The Fock products zf = Z F and fz = F Z reduce to eps_q Z and eps_p Z
+    !> when the reference is canonical.  Diagonal: 2 W_tt = Q_tt +
+    !> [t in occ] H+_tt[Z] + (Z F)_tt.
+    subroutine build_w_generic(qq, zf, fz, hz, noca_s, w)
+      real(kind=dp), intent(in), dimension(:,:) :: qq, zf, fz, hz
       integer, intent(in) :: noca_s
       real(kind=dp), intent(out), dimension(:,:) :: w
       integer :: p, q
@@ -2184,17 +2192,17 @@ contains
       hzs = umrsf_hzscale()
       w = 0.0_dp
       do q = 1, nbf
-        val = qq(q,q)
+        val = qq(q,q) + zf(q,q)
         if (q <= noca_s) val = val + hzs*hz(q,q)
         w(q,q) = val
         do p = 1, q-1
           if (q > nocca) then
             ! q in V: ia/xa (p in occ) or ab (p in V) -> transposed fold,
-            ! lower-index energy, no H+[Z]
-            val = qq(q,p) + ff(p,p)*zz(p,q)
+            ! (F Z) Fock product, no H+[Z]
+            val = qq(q,p) + fz(p,q)
           else
             ! occupied-side block ij/ix/xy
-            val = qq(p,q) + ff(q,q)*zz(p,q)
+            val = qq(p,q) + zf(p,q)
             if (p <= noca_s) val = val + hzs*hz(p,q)
           end if
           w(p,q) = val

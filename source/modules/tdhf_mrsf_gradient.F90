@@ -59,6 +59,21 @@ contains
     end if
   end function umrsf_xxscale
 
+  !> Development knob: scale the UMRSF inter (CO-OV) two-particle density
+  !> term for finite-difference calibration (OQP_UMRSF_INTSCALE, default 1).
+  function umrsf_intscale() result(s)
+    real(kind=dp) :: s
+    character(len=32) :: env
+    integer :: ios
+    real(kind=dp) :: v
+    s = 1.0_dp
+    call get_environment_variable('OQP_UMRSF_INTSCALE', env)
+    if (len_trim(env) > 0) then
+      read(env, *, iostat=ios) v
+      if (ios == 0) s = v
+    end if
+  end function umrsf_intscale
+
   subroutine tdhf_mrsf_gradient_C(c_handle) bind(C, name="tdhf_mrsf_gradient")
     use c_interop, only: oqp_handle_t, oqp_handle_get_info
     use types, only: information
@@ -780,7 +795,7 @@ contains
               dda = inter_dd(bco1a, bco2a, bo2va, bo1va, i1, j1, k1, l1)
               dcb = inter_dc(bco1b, bco2b, bo2vb, bo1vb, i1, j1, k1, l1)
               ddb = inter_dd(bco1b, bco2b, bo2vb, bo1vb, i1, j1, k1, l1)
-              df1 = df1 + sgnk*qfspcp3*0.5_dp*((-dca+dda) + (-dcb+ddb))
+              df1 = df1 + sgnk*qfspcp3*0.5_dp*umrsf_intscale()*((-dca+dda) + (-dcb+ddb))
             end if
 
             dabmax = max(dabmax, abs(df1))
