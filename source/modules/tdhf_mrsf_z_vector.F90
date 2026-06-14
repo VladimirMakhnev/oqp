@@ -1146,7 +1146,7 @@ contains
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
       int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs, usfztriv, &
-      usfromcal
+      usfromcal, umrsfsp, umrsfsp2
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -1203,6 +1203,7 @@ contains
   ! UMRSF data kept between the RHS build and the P/W assembly:
   ! fold matrices and the full-MO H+[T] transforms
     real(kind=dp), allocatable :: ha_u(:,:), hb_u(:,:), hpt_a(:,:), hpt_b(:,:)
+    real(kind=dp), allocatable :: ha_base(:,:), hb_base(:,:), xhxa_w(:,:), xhxb_w(:,:)
     real(kind=dp), allocatable, target :: pa(:,:,:)
     integer :: nsocc, lzdim, xvec_dim
 
@@ -2042,6 +2043,24 @@ contains
       call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
       qa = 2.0_dp*ha_u
       qb = 2.0_dp*hb_u
+      block
+        character(len=8) :: envw
+        call get_environment_variable('OQP_UMRSF_WSP_NEW', envw)
+        if (len_trim(envw) > 0) then
+          block
+            character(len=16) :: envf
+            real(kind=dp) :: wspf
+            integer :: ios2
+            wspf = 1.0_dp
+            call get_environment_variable('OQP_UMRSF_WSPF', envf)
+            if (len_trim(envf) > 0) then
+              read(envf,*,iostat=ios2) wspf
+            end if
+            qa = 2.0_dp*ha_base + wspf*xhxa_w
+            qb = 2.0_dp*hb_base + wspf*xhxb_w
+          end block
+        end if
+      end block
       call dgemm('n','n',nbf,nbf,nbf, &
                   1.0_dp, xv, nbf, &
                           fb, nbf, &
@@ -2250,8 +2269,7 @@ contains
           ! Classify relative to THIS spin's occupied/virtual boundary
           ! (noca_s): for beta, occ = C only and the SOMOs O are virtual.
           if (q > noca_s .and. p <= noca_s) then
-            ! occupied x virtual -> transposed fold, (F Z) Fock product
-            ! (occupied-index energy), no H+[Z]
+            ! occ x virt: W_ia = Q_ai + eps_i Z_ia (eq. umrsf-W) = qq(a,i)+(FZ)
             val = qq(q,p) + fz(p,q)
           else
             ! occupied-occupied (straight + H+[Z]) or virtual-virtual
@@ -2631,6 +2649,7 @@ contains
       integer :: ok_u
 
       allocate(ha_u(nbf,nbf), hb_u(nbf,nbf), hpt_a(nbf,nbf), hpt_b(nbf,nbf), &
+               ha_base(nbf,nbf), hb_base(nbf,nbf), xhxa_w(nbf,nbf), xhxb_w(nbf,nbf), &
                source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
 
@@ -2767,6 +2786,98 @@ contains
     ! Effective amplitude and the per-spin fold matrices
       call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
       call umrsfqassm(infos, fmrst2(1,:,:,:), wrk3, mo_a, mo_b, fa, fb, ha_u, hb_u)
+
+    ! W-SP (gated OQP_UMRSF_WSP_NEW): RO-style W folds = base fold (umrsfqassm
+    ! with SP channels zeroed) + dedicated two-set SP W-fold builder umrsfsp.
+      block
+        real(kind=dp), allocatable :: fbase(:,:,:), hspa(:,:), hspb(:,:)
+        character(len=16) :: e1,e2,e3,e4
+        real(kind=dp) :: fco,fov,fint,wsc
+        integer :: io1
+        allocate(fbase(11,nbf,nbf))
+        fbase = fmrst2(1,:,:,:); fbase(1:10,:,:) = 0.0_dp
+        call umrsfqassm(infos, fbase, wrk3, mo_a, mo_b, fa, fb, ha_base, hb_base)
+        deallocate(fbase)
+        ! Closed-form SP W-fold (notes/sp_fold_closed_form.md).  Per-family
+        ! scales sco/sov/sint localize the contribution; wsc is the overall
+        ! Q-coupling factor (Q^sigma = 2(base + wsc*hsp), default wsc=2).
+        ! FD survey (CH2/CH2O/butadiene): every nonzero SP W-fold (this closed
+        ! form OR umrsfqassm's, which are numerically identical) makes the total
+        ! gradient WORSE; wsc=0 (no SP fold in W) is the per-molecule optimum
+        ! (CH2 1.4e-3 -> 1.3e-4).  Default 0; sweepable via OQP_UMRSF_WSC.
+        fco=1.0_dp; fov=1.0_dp; fint=1.0_dp; wsc=0.0_dp
+        call get_environment_variable('OQP_UMRSF_FCO', e1)
+        call get_environment_variable('OQP_UMRSF_FOV', e2)
+        call get_environment_variable('OQP_UMRSF_FINT', e3)
+        call get_environment_variable('OQP_UMRSF_WSC', e4)
+        if (len_trim(e1)>0) read(e1,*,iostat=io1) fco
+        if (len_trim(e2)>0) read(e2,*,iostat=io1) fov
+        if (len_trim(e3)>0) read(e3,*,iostat=io1) fint
+        if (len_trim(e4)>0) read(e4,*,iostat=io1) wsc
+        allocate(hspa(nbf,nbf), hspb(nbf,nbf))
+        call umrsfsp2(hspa, hspb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), &
+                      nocca, noccb, fco, fov, fint)
+        xhxa_w = wsc*hspa
+        xhxb_w = wsc*hspb
+        deallocate(hspa, hspb)
+      end block
+
+    ! V1 gate: the antisymmetric occ-virt part of the closed-form SP fold must
+    ! reproduce the SP part of the FD-validated RHS R (= 2(ha_u - ha_base)
+    ! restricted to the same antisymmetrization).  Printed for calibration.
+      block
+        character(len=8) :: ev1
+        call get_environment_variable('OQP_UMRSF_V1', ev1)
+        if (len_trim(ev1) > 0) then
+          block
+          real(kind=dp), allocatable :: hspa(:,:), hspb(:,:)
+          real(kind=dp) :: da, db, sa, sb, dan, dbn, hh, rr
+          real(kind=dp) :: vco,vov,vint
+          character(len=16) :: g1,g2,g3
+          integer :: i2, a2, gio
+          vco=1.0_dp; vov=1.0_dp; vint=1.0_dp
+          call get_environment_variable('OQP_UMRSF_FCO', g1)
+          call get_environment_variable('OQP_UMRSF_FOV', g2)
+          call get_environment_variable('OQP_UMRSF_FINT', g3)
+          if (len_trim(g1)>0) read(g1,*,iostat=gio) vco
+          if (len_trim(g2)>0) read(g2,*,iostat=gio) vov
+          if (len_trim(g3)>0) read(g3,*,iostat=gio) vint
+          allocate(hspa(nbf,nbf), hspb(nbf,nbf))
+          ! compare the SIGN-CORRECTED fold (-hsp) to the FD-validated R^SP
+          call umrsfsp2(hspa, hspb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), &
+                        nocca, noccb, -vco, -vov, -vint)
+          da=0.0_dp; sa=0.0_dp; dan=0.0_dp
+          do i2 = 1, nocca
+            do a2 = nocca+1, nbf
+              hh = 2.0_dp*(hspa(i2,a2)-hspa(a2,i2))
+              rr = 2.0_dp*((ha_u(i2,a2)-ha_base(i2,a2)) &
+                          -(ha_u(a2,i2)-ha_base(a2,i2)))
+              da  = max(da,  abs(hh - rr))
+              dan = max(dan, abs(-hh - rr))
+              sa  = max(sa,  abs(rr))
+            end do
+          end do
+          db=0.0_dp; sb=0.0_dp; dbn=0.0_dp
+          do i2 = 1, noccb
+            do a2 = noccb+1, nbf
+              hh = 2.0_dp*(hspb(i2,a2)-hspb(a2,i2))
+              rr = 2.0_dp*((hb_u(i2,a2)-hb_base(i2,a2)) &
+                          -(hb_u(a2,i2)-hb_base(a2,i2)))
+              db  = max(db,  abs(hh - rr))
+              dbn = max(dbn, abs(-hh - rr))
+              sb  = max(sb,  abs(rr))
+            end do
+          end do
+          write(iw,'(/5x,a)') 'UMRSF SP-fold V1 gate (antisym occ-virt vs R)'
+          write(iw,'(5x,a,1p,e12.4,3x,a,e12.4,3x,a,e12.4)') &
+            'alpha max|diff|=',da,'(neg)=',dan,'max|R^SP|=',sa
+          write(iw,'(5x,a,1p,e12.4,3x,a,e12.4,3x,a,e12.4)') &
+            'beta  max|diff|=',db,'(neg)=',dbn,'max|R^SP|=',sb
+          call flush(iw)
+          deallocate(hspa, hspb)
+          end block
+        end if
+      end block
 
     ! Free consistency diagnostics (cheap: one extra matvec assembly, no
     ! extra ERI run): the fold-trace identity G = (tr Ha + tr Hb)/2 must

@@ -1957,6 +1957,163 @@ contains
   end subroutine mrsfsp
 
 
+!>    @brief  Closed-form spin-pairing W-fold H^SP_{tu,sigma} for UMRSF.
+!>    @detail Direct implementation of notes/sp_fold_closed_form.md:
+!>            H^SP_{tu,s} = 1/2 sum_mu (dG^SP/dC^s_{mu t}) C^s_{mu u}, with the
+!>            mixed-spin intra exchange (K~^CO, K~^OV) and the per-spin inter
+!>            (J-K) potentials (Pi, Pi') resolved term by term.  Channels carry
+!>            sgn(k)*c_family already.  Intra (ch 9,10) = K; inter (ch 1-8) =
+!>            (J-K) with the 1/2 (aa+bb) average.  Per-family scales sco/sov/sint
+!>            and overall handled by the caller.
+!>            ca=C^alpha, cb=C^beta, xv=X (MO), lr1=O1=nocb+1, lr2=O2=noca,
+!>            C=1..nocb, V=noca+1..nbf.  hspa/hspb are H^SP_{tu} (t=row,u=col).
+  subroutine umrsfsp2(hspa, hspb, ca, cb, xv, fmrsf, noca, nocb, sco, sov, sint)
+
+    use precision, only: dp
+    use messages, only: show_message, with_abort
+    implicit none
+
+    real(kind=dp), intent(out), dimension(:,:) :: hspa, hspb
+    real(kind=dp), intent(in), dimension(:,:) :: ca, cb, xv
+    real(kind=dp), intent(in), target, dimension(:,:,:) :: fmrsf
+    integer, intent(in) :: noca, nocb
+    real(kind=dp), intent(in) :: sco, sov, sint
+
+    integer :: nbf, i, a, u, lr1, lr2, ok
+    real(kind=dp), allocatable :: tmp(:,:), kco(:,:), kov(:,:), &
+      piCa1(:,:), piCa2(:,:), piPa1(:,:), piPa2(:,:), &
+      piCb1(:,:), piCb2(:,:), piPb1(:,:), piPb2(:,:)
+    real(kind=dp) :: sci, sci2
+
+    nbf = ubound(ca,1)
+    lr1 = nocb+1     ! O1
+    lr2 = noca       ! O2
+
+    allocate(tmp(nbf,nbf), kco(nbf,nbf), kov(nbf,nbf), &
+             piCa1(nbf,nbf), piCa2(nbf,nbf), piPa1(nbf,nbf), piPa2(nbf,nbf), &
+             piCb1(nbf,nbf), piCb2(nbf,nbf), piPb1(nbf,nbf), piPb2(nbf,nbf), &
+             source=0.0_dp, stat=ok)
+    if (ok /= 0) call show_message('Cannot allocate memory', with_abort)
+
+    hspa = 0.0_dp
+    hspb = 0.0_dp
+
+    ! ---- mixed-set intra exchange sandwiches  K~ = C^aT (K[D]) C^b ----
+    call sandwich(ca, fmrsf(10,:,:), cb, kco, tmp, nbf)   ! K~^CO
+    call sandwich(ca, fmrsf( 9,:,:), cb, kov, tmp, nbf)   ! K~^OV
+    ! ---- pure-set inter potentials  Pi = C^sT (J-K)[B] C^s ----
+    ! Pi^{Cm,a} uses (J-K)[B^{V mbar,a}]:  m=1->ch1(o2v a), m=2->ch3(o1v a)
+    call sandwich(ca, fmrsf(1,:,:), ca, piCa1, tmp, nbf)
+    call sandwich(ca, fmrsf(3,:,:), ca, piCa2, tmp, nbf)
+    ! Pi'^{m,a} uses (J-K)[B^{Cm,a}]:  m=1->ch5(co1 a), m=2->ch7(co2 a)
+    call sandwich(ca, fmrsf(5,:,:), ca, piPa1, tmp, nbf)
+    call sandwich(ca, fmrsf(7,:,:), ca, piPa2, tmp, nbf)
+    ! beta versions
+    call sandwich(cb, fmrsf(2,:,:), cb, piCb1, tmp, nbf)
+    call sandwich(cb, fmrsf(4,:,:), cb, piCb2, tmp, nbf)
+    call sandwich(cb, fmrsf(6,:,:), cb, piPb1, tmp, nbf)
+    call sandwich(cb, fmrsf(8,:,:), cb, piPb2, tmp, nbf)
+
+    sci  = 0.5_dp*sint
+    sci2 = 0.5_dp*sint
+
+    ! ====================  alpha fold  ====================
+    ! c_CO  [t in C]
+    do i = 1, nocb
+      do u = 1, nbf
+        hspa(i,u) = hspa(i,u) + sco*( xv(i,lr1)*kco(u,lr2) - xv(i,lr2)*kco(u,lr1) )
+      end do
+    end do
+    ! c_OV  [t in O]
+    do u = 1, nbf
+      do a = noca+1, nbf
+        hspa(lr1,u) = hspa(lr1,u) + sov*xv(lr2,a)*kov(u,a)
+        hspa(lr2,u) = hspa(lr2,u) - sov*xv(lr1,a)*kov(u,a)
+      end do
+    end do
+    ! c_int (A) [t in C]
+    do i = 1, nocb
+      do u = 1, nbf
+        hspa(i,u) = hspa(i,u) + sci*( xv(i,lr1)*piCa1(u,lr1) + xv(i,lr2)*piCa2(u,lr2) )
+      end do
+    end do
+    ! c_int (B) [t in O]
+    do u = 1, nbf
+      do i = 1, nocb
+        hspa(lr1,u) = hspa(lr1,u) + sci*xv(i,lr1)*piCa1(i,u)
+        hspa(lr2,u) = hspa(lr2,u) + sci*xv(i,lr2)*piCa2(i,u)
+      end do
+    end do
+    ! c_int (D) [t in O]
+    do u = 1, nbf
+      do a = noca+1, nbf
+        hspa(lr2,u) = hspa(lr2,u) + sci*xv(lr2,a)*piPa2(u,a)
+        hspa(lr1,u) = hspa(lr1,u) + sci*xv(lr1,a)*piPa1(u,a)
+      end do
+    end do
+    ! c_int (C) [t in V]
+    do u = 1, nbf
+      do a = noca+1, nbf
+        hspa(a,u) = hspa(a,u) + sci2*( xv(lr2,a)*piPa2(lr2,u) + xv(lr1,a)*piPa1(lr1,u) )
+      end do
+    end do
+
+    ! ====================  beta fold  ====================
+    ! c_CO  [t in O]
+    do u = 1, nbf
+      do i = 1, nocb
+        hspb(lr2,u) = hspb(lr2,u) + sco*xv(i,lr1)*kco(i,u)
+        hspb(lr1,u) = hspb(lr1,u) - sco*xv(i,lr2)*kco(i,u)
+      end do
+    end do
+    ! c_OV  [t in V]
+    do u = 1, nbf
+      do a = noca+1, nbf
+        hspb(a,u) = hspb(a,u) + sov*( xv(lr2,a)*kov(lr1,u) - xv(lr1,a)*kov(lr2,u) )
+      end do
+    end do
+    ! c_int (A) [t in C]
+    do i = 1, nocb
+      do u = 1, nbf
+        hspb(i,u) = hspb(i,u) + sci*( xv(i,lr1)*piCb1(u,lr1) + xv(i,lr2)*piCb2(u,lr2) )
+      end do
+    end do
+    ! c_int (B) [t in O]
+    do u = 1, nbf
+      do i = 1, nocb
+        hspb(lr1,u) = hspb(lr1,u) + sci*xv(i,lr1)*piCb1(i,u)
+        hspb(lr2,u) = hspb(lr2,u) + sci*xv(i,lr2)*piCb2(i,u)
+      end do
+    end do
+    ! c_int (D) [t in O]
+    do u = 1, nbf
+      do a = noca+1, nbf
+        hspb(lr2,u) = hspb(lr2,u) + sci*xv(lr2,a)*piPb2(u,a)
+        hspb(lr1,u) = hspb(lr1,u) + sci*xv(lr1,a)*piPb1(u,a)
+      end do
+    end do
+    ! c_int (C) [t in V]
+    do u = 1, nbf
+      do a = noca+1, nbf
+        hspb(a,u) = hspb(a,u) + sci2*( xv(lr2,a)*piPb2(lr2,u) + xv(lr1,a)*piPb1(lr1,u) )
+      end do
+    end do
+
+    deallocate(tmp, kco, kov, piCa1, piCa2, piPa1, piPa2, &
+               piCb1, piCb2, piPb1, piPb2)
+
+  contains
+    subroutine sandwich(cl, m, cr, out, scr, n)
+      integer, intent(in) :: n
+      real(kind=dp), intent(in) :: cl(:,:), m(:,:), cr(:,:)
+      real(kind=dp), intent(out) :: out(:,:), scr(:,:)
+      call dgemm('t','n', n, n, n, 1.0_dp, cl, n, m, n, 0.0_dp, scr, n)
+      call dgemm('n','n', n, n, n, 1.0_dp, scr, n, cr, n, 0.0_dp, out, n)
+    end subroutine sandwich
+
+  end subroutine umrsfsp2
+
+
 !>    @brief    Spin-pairing parts
 !>              of singlet and triplet UMRSF Lagrangian
 !>
