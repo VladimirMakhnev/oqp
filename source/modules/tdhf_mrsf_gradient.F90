@@ -74,14 +74,6 @@ contains
     end if
   end function umrsf_intscale
 
-  ! Audit gate for the corrected (un-transposed) two-set intra Gamma-SP.
-  function umrsf_gspfix() result(on)
-    logical :: on
-    character(len=8) :: env
-    call get_environment_variable('OQP_UMRSF_GSPFIX', env)
-    on = (len_trim(env) > 0)
-  end function umrsf_gspfix
-
   function umrsf_db1scale() result(s)
     real(kind=dp) :: s
     character(len=32) :: env
@@ -829,49 +821,27 @@ contains
             ! RO-copied pattern transposed the 2nd factor (correct only when
             ! the density is symmetric, e.g. the RO limit).  Gated for FD audit.
             if (qfspcp1 /= 0.0_dp) then
-              if (umrsf_gspfix()) then
-                db1 =  co12(i1,k1)*co12(j1,l1) &
-                     + co12(j1,k1)*co12(i1,l1) &
-                     + co12(k1,i1)*co12(l1,j1) &
-                     + co12(l1,i1)*co12(k1,j1) &
-                     + co12(j1,l1)*co12(i1,k1) &
-                     + co12(i1,l1)*co12(j1,k1) &
-                     + co12(l1,j1)*co12(k1,i1) &
-                     + co12(k1,j1)*co12(l1,i1)
-              else
-                db1 =  co12(i1,k1)*co12(l1,j1) &
-                     + co12(i1,l1)*co12(k1,j1) &
-                     + co12(j1,k1)*co12(l1,i1) &
-                     + co12(j1,l1)*co12(k1,i1) &
-                     + co12(l1,j1)*co12(i1,k1) &
-                     + co12(k1,j1)*co12(i1,l1) &
-                     + co12(l1,i1)*co12(j1,k1) &
-                     + co12(k1,i1)*co12(j1,l1)
-              end if
+              db1 =  co12(i1,k1)*co12(j1,l1) &
+                   + co12(j1,k1)*co12(i1,l1) &
+                   + co12(k1,i1)*co12(l1,j1) &
+                   + co12(l1,i1)*co12(k1,j1) &
+                   + co12(j1,l1)*co12(i1,k1) &
+                   + co12(i1,l1)*co12(j1,k1) &
+                   + co12(l1,j1)*co12(k1,i1) &
+                   + co12(k1,j1)*co12(l1,i1)
               df1 = df1 + sgnk*qfspcp1*umrsf_db1scale()*db1
             end if
 
             ! Intra OV (o21v, mixed set) -- exchange paired (same fix as CO).
             if (qfspcp2 /= 0.0_dp) then
-              if (umrsf_gspfix()) then
-                db2 =  o21v(i1,k1)*o21v(j1,l1) &
-                     + o21v(j1,k1)*o21v(i1,l1) &
-                     + o21v(k1,i1)*o21v(l1,j1) &
-                     + o21v(l1,i1)*o21v(k1,j1) &
-                     + o21v(j1,l1)*o21v(i1,k1) &
-                     + o21v(i1,l1)*o21v(j1,k1) &
-                     + o21v(l1,j1)*o21v(k1,i1) &
-                     + o21v(k1,j1)*o21v(l1,i1)
-              else
-                db2 =  o21v(i1,k1)*o21v(l1,j1) &
-                     + o21v(i1,l1)*o21v(k1,j1) &
-                     + o21v(j1,k1)*o21v(l1,i1) &
-                     + o21v(j1,l1)*o21v(k1,i1) &
-                     + o21v(l1,j1)*o21v(i1,k1) &
-                     + o21v(k1,j1)*o21v(i1,l1) &
-                     + o21v(l1,i1)*o21v(j1,k1) &
-                     + o21v(k1,i1)*o21v(j1,l1)
-              end if
+              db2 =  o21v(i1,k1)*o21v(j1,l1) &
+                   + o21v(j1,k1)*o21v(i1,l1) &
+                   + o21v(k1,i1)*o21v(l1,j1) &
+                   + o21v(l1,i1)*o21v(k1,j1) &
+                   + o21v(j1,l1)*o21v(i1,k1) &
+                   + o21v(i1,l1)*o21v(j1,k1) &
+                   + o21v(l1,j1)*o21v(k1,i1) &
+                   + o21v(k1,j1)*o21v(l1,i1)
               df1 = df1 + sgnk*qfspcp2*umrsf_db2scale()*db2
             end if
 
