@@ -2134,7 +2134,7 @@ contains
 
       call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, z_be, nbf, fb, nbf, 0.0_dp, hza_zf, nbf)
       call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, fb, nbf, z_be, nbf, 0.0_dp, hza_fz, nbf)
-      call build_w_generic(qb, hza_zf, hza_fz, hzb, noccb, wmo)
+      call build_w_generic(qb, hza_zf, hza_fz, hzb, noccb, wmo, nocca)
       call orthogonal_transform('t', nbf, mo_b, wmo, scr, xv)
       scr = umrsf_wscale()*scr
       do p = 1, nbf
@@ -2268,15 +2268,13 @@ contains
     subroutine scale_offclass(z, no, which)
       real(kind=dp), intent(inout) :: z(:,:)
       integer, intent(in) :: no
-      integer, intent(in), optional :: which  ! 1=alpha C-O, 2=beta O-V
+      integer, intent(in) :: which  ! 1=alpha C-O, 2=beta O-V
       character(len=16) :: env
-      integer :: p, q, ios, cp, cq, w
+      integer :: p, q, ios, cp, cq
       real(kind=dp) :: s
-      w = 0
-      if (present(which)) w = which
       env = ''
-      if (w == 1) call get_environment_variable('OQP_UMRSF_OFFSCALE_A', env)
-      if (w == 2) call get_environment_variable('OQP_UMRSF_OFFSCALE_B', env)
+      if (which == 1) call get_environment_variable('OQP_UMRSF_OFFSCALE_A', env)
+      if (which == 2) call get_environment_variable('OQP_UMRSF_OFFSCALE_B', env)
       if (len_trim(env) == 0) call get_environment_variable('OQP_UMRSF_OFFSCALE', env)
       if (len_trim(env) == 0) return
       read(env, *, iostat=ios) s
@@ -2319,13 +2317,20 @@ contains
     !> The Fock products zf = Z F and fz = F Z reduce to eps_q Z and eps_p Z
     !> when the reference is canonical.  Diagonal: 2 W_tt = Q_tt +
     !> [t in occ] H+_tt[Z] + (Z F)_tt.
-    subroutine build_w_generic(qq, zf, fz, hz, noca_s, w)
+    subroutine build_w_generic(qq, zf, fz, hz, noca_s, w, no_lower)
       real(kind=dp), intent(in), dimension(:,:) :: qq, zf, fz, hz
       integer, intent(in) :: noca_s
       real(kind=dp), intent(out), dimension(:,:) :: w
-      integer :: p, q
+      integer, intent(in), optional :: no_lower  ! O/V boundary within virt (=nocca)
+      integer :: p, q, nlo
       real(kind=dp) :: val, hzs
+      logical :: wxa
+      character(len=8) :: ewxa
       hzs = umrsf_hzscale()
+      nlo = noca_s
+      if (present(no_lower)) nlo = no_lower
+      call get_environment_variable('OQP_UMRSF_WXATRANS', ewxa)
+      wxa = (len_trim(ewxa) > 0)
       w = 0.0_dp
       do q = 1, nbf
         val = qq(q,q) + zf(q,q)
@@ -2337,6 +2342,12 @@ contains
           if (q > noca_s .and. p <= noca_s) then
             ! occ x virt: W_ia = Q_ai + eps_i Z_ia (eq. umrsf-W) = qq(a,i)+(FZ)
             val = qq(q,p) + fz(p,q)
+          else if (wxa .and. q > nlo .and. p > noca_s .and. p <= nlo) then
+            ! beta O-V (off-class canonicalization, O=virt of beta): eq. umrsf-W
+            ! gives W^beta_xa = Q^beta_ax + eps_x Z (TRANSPOSED Q, unlike the
+            ! straight O-O / V-V virt-virt blocks).  p in O (noca_s<p<=nlo),
+            ! q in V (q>nlo).  Gated test of the eq-W transpose for this block.
+            val = qq(q,p) + zf(p,q)
           else
             ! occupied-occupied (straight + H+[Z]) or virtual-virtual
             ! (straight, no H+): straight fold, (Z F) Fock product
