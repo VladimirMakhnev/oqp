@@ -2000,6 +2000,8 @@ contains
     ! blocks (OQP_UMRSF_WCSCALE, default 1) consistently in P, W and H+[Z].
       call scale_ccvv(z_al)
       call scale_ccvv(z_be)
+      call scale_offclass(z_al, nocca)
+      call scale_offclass(z_be, noccb)
 
     ! H+[Z_total]: one-sided density C*triu(Z)*C^T (full multiplier), the
     ! same convention as the CPKS operator (usfrogen) so int2_tdgrd produces
@@ -2224,6 +2226,32 @@ contains
         end do
       end do
     end subroutine scale_ccvv
+
+    !> Diagnostic: scale the OFF-class canonicalization within-class multiplier
+    !> blocks by OQP_UMRSF_OFFSCALE -- for the alpha set the C-O occ-occ block,
+    !> for the beta set the O-V virt-virt block (both same side of the occ
+    !> boundary `no`, different SF-class).  These are the SP-only canonicalization
+    !> multipliers (zero at spc=0) untouched by scale_ccvv; isolating them tests
+    !> whether their P/W/H+[Z] consumption carries the residual.
+    subroutine scale_offclass(z, no)
+      real(kind=dp), intent(inout) :: z(:,:)
+      integer, intent(in) :: no
+      character(len=16) :: env
+      integer :: p, q, ios, cp, cq
+      real(kind=dp) :: s
+      call get_environment_variable('OQP_UMRSF_OFFSCALE', env)
+      if (len_trim(env) == 0) return
+      read(env, *, iostat=ios) s
+      if (ios /= 0) return
+      do q = 1, nbf
+        cq = merge(1, merge(2, 3, q <= nocca), q <= noccb)  ! 1=C,2=O,3=V
+        do p = 1, nbf
+          cp = merge(1, merge(2, 3, p <= nocca), p <= noccb)
+          ! same side of the occ boundary (within-class) but different SF-class
+          if (cp /= cq .and. ((p <= no) .eqv. (q <= no))) z(p,q) = s*z(p,q)
+        end do
+      end do
+    end subroutine scale_offclass
 
     !> One-sided AO density D = C * triu(Z) * C^T from a symmetric MO
     !> multiplier matrix (strict upper triangle = one multiplier per pair).

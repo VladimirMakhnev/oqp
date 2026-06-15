@@ -1120,19 +1120,26 @@ def _check_runtype(config: dict[str, Any], report: CheckReport,
     td_type = _as_lower(_get(config, "tdhf", "type", "rpa"))
     _umrsf_grad_dev = os.environ.get("OQP_UMRSF_GRAD_DEV", "").lower() in (
         "1", "true", "yes", "on")
-    if (method == "tdhf" and td_type == "umrsf" and runtype != "energy"
-            and not _umrsf_grad_dev):
-        report.add(
-            "ERROR",
-            "tdhf.type",
-            "UMRSF-TDDFT only supports runtype=energy; "
-            "gradients, Hessians, and Z-vectors are not implemented.",
-            value=f"{td_type}/{runtype}",
-            expected="energy",
-            action="Use runtype=energy for UMRSF-TDDFT until UMRSF-TDDFT gradients/Z-vectors are implemented.",
-            wiki=WIKI_HELP["tdhf.type"],
-        )
-        return
+    # runtype=energy is always allowed. The in-progress UMRSF gradient is
+    # enabled ONLY for runtype=grad and ONLY under OQP_UMRSF_GRAD_DEV. Every
+    # other runtype (hess/thermo, nac/nacme, optimize/meci/mecp/mep/ts/irc/neb,
+    # ...) stays blocked even with the dev flag, because the gradient is not yet
+    # validation-grade and must not silently drive numerical Hessians,
+    # non-adiabatic couplings, or geometry optimizations.
+    if method == "tdhf" and td_type == "umrsf" and runtype != "energy":
+        if not (runtype == "grad" and _umrsf_grad_dev):
+            report.add(
+                "ERROR",
+                "tdhf.type",
+                "UMRSF-TDDFT supports runtype=energy; runtype=grad is available "
+                "only under OQP_UMRSF_GRAD_DEV (in-progress). Hessians, NAC, and "
+                "geometry optimization are not implemented for UMRSF-TDDFT.",
+                value=f"{td_type}/{runtype}",
+                expected="energy (or grad with OQP_UMRSF_GRAD_DEV)",
+                action="Use runtype=energy, or runtype=grad with OQP_UMRSF_GRAD_DEV set for the developmental gradient.",
+                wiki=WIKI_HELP["tdhf.type"],
+            )
+            return
 
     if runtype == "grad":
         if method == "hf":

@@ -9,18 +9,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ENERGY = ROOT / "source" / "modules" / "tdhf_mrsf_energy.F90"
 LIB = ROOT / "source" / "tdhf_mrsf_lib.F90"
+GRADIENT = ROOT / "source" / "modules" / "tdhf_mrsf_gradient.F90"
 SINGLE_POINT = ROOT / "pyoqp" / "oqp" / "library" / "single_point.py"
 OQPDATA = ROOT / "pyoqp" / "oqp" / "molecule" / "oqpdata.py"
 INPUT_CHECKER = ROOT / "pyoqp" / "oqp" / "utils" / "input_checker.py"
 
-# Every UMRSF runtype other than "energy" eventually drives a gradient,
-# Hessian, or Z-vector, none of which are implemented for UMRSF. ("thermo"
-# is also gradient-driven but is not in the checker's recognized runtype set,
-# so it is rejected earlier as an unknown runtype rather than by this guard.)
-UMRSF_BLOCKED_RUNTYPES = (
-    "grad", "prop", "data", "hess", "nac", "nacme",
+# UMRSF implements only the energy path in production, plus an in-progress
+# gradient gated behind OQP_UMRSF_GRAD_DEV that is enabled for runtype=grad
+# ONLY. Every other non-energy runtype (Hessian/NAC/optimization, plus the
+# gradient-driven prop/data) stays blocked even with the dev flag, because the
+# developmental gradient must not silently drive numerical Hessians, couplings,
+# or optimizations. ("thermo" is rejected earlier as an unknown runtype.)
+UMRSF_ALWAYS_BLOCKED_RUNTYPES = (
+    "prop", "data", "hess", "nac", "nacme",
     "optimize", "meci", "mecp", "mep", "ts", "irc", "neb",
 )
+# Enabled by the dev flag (and only by it).
+UMRSF_DEV_GATED_RUNTYPES = ("grad",)
 
 
 def compact(text: str) -> str:
@@ -71,7 +76,7 @@ def _umrsf_guard_errors(report):
     return [
         diag
         for diag in report.errors
-        if diag.path == "tdhf.type" and "only supports runtype=energy" in diag.message.lower()
+        if diag.path == "tdhf.type" and "supports runtype=energy" in diag.message.lower()
     ]
 
 
@@ -123,33 +128,82 @@ class UMRSFEnergyRegressionTests(unittest.TestCase):
         self.assertIn("self._data.tddft.umrsf=td_type=='umrsf'", oqpdata)
         self.assertIn("umrsf-tddft gradients are not implemented", single)
 
-    def test_umrsf_energy_runtype_is_not_blocked(self):
+    @staticmethod
+    def _set_grad_dev(value):
+        import os
+        if value is None:
+            os.environ.pop("OQP_UMRSF_GRAD_DEV", None)
+        else:
+            os.environ["OQP_UMRSF_GRAD_DEV"] = value
+
+    def _report(self, runtype):
         checker = _load_input_checker()
-        report = checker.check_input_values(
-            _umrsf_config("energy"), raise_error=False, emit=False
-        )
-        self.assertEqual(
-            _umrsf_guard_errors(report),
-            [],
-            "UMRSF energy must not be rejected by the runtype guard:\n"
-            + report.to_text(),
+        return checker.check_input_values(
+            _umrsf_config(runtype), raise_error=False, emit=False
         )
 
-    def test_umrsf_non_energy_runtypes_are_blocked_at_the_single_choke_point(self):
-        checker = _load_input_checker()
-        for runtype in UMRSF_BLOCKED_RUNTYPES:
-            with self.subTest(runtype=runtype):
-                report = checker.check_input_values(
-                    _umrsf_config(runtype), raise_error=False, emit=False
-                )
-                guard_errors = _umrsf_guard_errors(report)
-                self.assertEqual(
-                    len(guard_errors),
-                    1,
-                    f"runtype={runtype} should raise exactly one UMRSF guard "
-                    f"error, got {len(guard_errors)}:\n" + report.to_text(),
-                )
-                self.assertIn(runtype, guard_errors[0].value)
+    def test_umrsf_energy_runtype_is_not_blocked(self):
+        for dev in (None, "1"):
+            with self.subTest(dev=dev):
+                self._set_grad_dev(dev)
+                try:
+                    self.assertEqual(
+                        _umrsf_guard_errors(self._report("energy")),
+                        [],
+                        "UMRSF energy must never be rejected by the runtype guard.",
+                    )
+                finally:
+                    self._set_grad_dev(None)
+
+    def test_umrsf_grad_is_gated_by_the_dev_flag(self):
+        # Without the dev flag: grad is blocked. With it: grad is allowed.
+        self._set_grad_dev(None)
+        try:
+            self.assertEqual(
+                len(_umrsf_guard_errors(self._report("grad"))), 1,
+                "Without OQP_UMRSF_GRAD_DEV, runtype=grad must be blocked.",
+            )
+            self._set_grad_dev("1")
+            self.assertEqual(
+                _umrsf_guard_errors(self._report("grad")), [],
+                "With OQP_UMRSF_GRAD_DEV, runtype=grad must be allowed.",
+            )
+        finally:
+            self._set_grad_dev(None)
+
+    def test_umrsf_nongrad_runtypes_blocked_even_with_dev_flag(self):
+        # Hessian/NAC/optimization etc. must stay blocked EVEN with the dev
+        # flag: the developmental gradient must not drive them.
+        for dev in (None, "1"):
+            self._set_grad_dev(dev)
+            try:
+                for runtype in UMRSF_ALWAYS_BLOCKED_RUNTYPES:
+                    with self.subTest(runtype=runtype, dev=dev):
+                        guard_errors = _umrsf_guard_errors(self._report(runtype))
+                        self.assertEqual(
+                            len(guard_errors), 1,
+                            f"runtype={runtype} (dev={dev}) must raise exactly "
+                            f"one UMRSF guard error, got {len(guard_errors)}.",
+                        )
+                        self.assertIn(runtype, guard_errors[0].value)
+            finally:
+                self._set_grad_dev(None)
+
+    def test_umrsf_intra_gamma_sp_is_not_transposed(self):
+        # Two-set intra Gamma-SP: differentiating G_CO = sum (mu nu|ka la)
+        # D^CO_{mu ka} D^CO_{nu la} gives the (ij|kl) cofactor co12(i,k)*
+        # co12(j,l) -- the SECOND mixed-set density factor must NOT be the
+        # transpose co12(l,j). The RO-copied transposed form was a bug
+        # (invisible only when the density is symmetric, i.e. the RO limit).
+        src = compact(GRADIENT.read_text())
+        # corrected, un-transposed leading terms must be present (UMRSF path)
+        self.assertIn("co12(i1,k1)*co12(j1,l1)", src)
+        self.assertIn("o21v(i1,k1)*o21v(j1,l1)", src)
+        # the RO-copied transposed leading term must NOT drive the UMRSF
+        # intra-CO density (db1).  It legitimately remains in the RO get_density,
+        # so we only require that the corrected term is the one feeding df1 via
+        # umrsf_db1scale (i.e. the corrected pattern exists).
+        self.assertIn("df1=df1+sgnk*qfspcp1*umrsf_db1scale()*db1", src)
 
     def test_umrsf_energy_does_not_use_mrsf_transition_density_output_path(self):
         source = compact(ENERGY.read_text())

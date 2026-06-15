@@ -292,6 +292,14 @@ contains
     end if
 
 !   Compute 2e gradient
+    block
+      character(len=8) :: e_pg
+      call get_environment_variable('OQP_UMRSF_PRINTG', e_pg)
+      if (len_trim(e_pg) > 0) then
+        write(iw,'(/5x,a)') 'UMRSF grad split: 1e+W contribution (before 2e):'
+        write(iw,'(5x,3f18.10)') transpose(infos%atoms%grad)
+      end if
+    end block
     if (mrst==1 .or. mrst==3) then
       if (umrsf) then
         call umrsf_2e_grad(basis, infos, d, p, spc, v(:,:,1))
@@ -301,6 +309,15 @@ contains
     else if (mrst==5) then
       call sf_2e_grad(basis, infos, d, p, v(:,:,1))
     end if
+
+    block
+      character(len=8) :: e_pg
+      call get_environment_variable('OQP_UMRSF_PRINTG', e_pg)
+      if (len_trim(e_pg) > 0) then
+        write(iw,'(/5x,a)') 'UMRSF grad split: total (after 2e/Gamma):'
+        write(iw,'(5x,3f18.10)') transpose(infos%atoms%grad)
+      end if
+    end block
 
     call print_gradient(infos)
 
