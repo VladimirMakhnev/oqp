@@ -2195,20 +2195,24 @@ contains
           block
             real(kind=dp), allocatable :: dipints(:,:)
             real(kind=dp) :: trz, wk
-            integer :: pp, qq, ij2
-            allocate(dipints(nbf_tri,3), source=0.0_dp)
+            integer :: pp, qq, ij2, comp2
+            character(len=32) :: ecomp2
+            comp2 = 3
+            call get_environment_variable('OQP_UMRSF_FIELDCOMP', ecomp2)
+            if (len_trim(ecomp2) > 0) read(ecomp2,*) comp2
+            allocate(dipints(nbf_tri,9), source=0.0_dp)
             call multipole_integrals(basis, dipints, &
-                                     [0.0_dp,0.0_dp,0.0_dp], 1)
+                                     [0.0_dp,0.0_dp,0.0_dp], 2)
             trz = 0.0_dp; ij2 = 0
             do qq = 1, nbf
               do pp = 1, qq
                 ij2 = ij2 + 1
                 wk = merge(1.0_dp, 2.0_dp, pp==qq)
-                trz = trz + wk*(td_p(ij2,1)+td_p(ij2,2))*dipints(ij2,3)
+                trz = trz + wk*(td_p(ij2,1)+td_p(ij2,2))*dipints(ij2,comp2)
               end do
             end do
-            write(iw,'(5x,a,1p,e18.10)') &
-              'UMRSF analytic Tr[P z] (relaxed-difference dipole_z) =', trz
+            write(iw,'(5x,a,i2,a,1p,e18.10)') &
+              'UMRSF analytic Tr[P V] comp=', comp2, ' =', trz
             deallocate(dipints)
           end block
         end if
