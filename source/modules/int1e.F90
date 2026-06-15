@@ -26,7 +26,7 @@ contains
     use precision, only: dp
     use io_constants, only: iw
     use constants, only: tol_int
-    use int1, only: omp_hst
+    use int1, only: omp_hst, multipole_integrals
     use basis_tools, only: basis_set
     use printing, only: print_sym_labeled
     use messages, only: show_message, WITH_ABORT
@@ -105,6 +105,30 @@ contains
     tol = log(10.0d0)*tol_int
     call omp_hst(basis, infos%atoms%xyz, infos%atoms%zn - infos%basis%ecp_zn_num, hcore, smat, tmat,&
             logtol=tol, comm=infos%mpiinfo%comm, usempi=infos%mpiinfo%usempi)
+
+!   Diagnostic one-electron z-field perturbation (OQP_UMRSF_FIELDZ=lambda):
+!   adds lambda * <mu|z|nu> to Hcore before SCF, so a central difference of any
+!   state energy w.r.t. lambda yields Tr[D(state) z].  Used to FD-validate the
+!   relaxed difference density P (Tr[P z] = dE(state)/dlam - dE(scf)/dlam).
+    block
+      character(len=32) :: efenv
+      real(kind=dp) :: lam
+      real(kind=dp), allocatable :: dipints(:,:)
+      integer :: ios_ef
+      call get_environment_variable('OQP_UMRSF_FIELDZ', efenv)
+      if (len_trim(efenv) > 0) then
+        read(efenv,*,iostat=ios_ef) lam
+        if (ios_ef == 0 .and. lam /= 0.0_dp) then
+          allocate(dipints(nbf2, 3), source=0.0_dp)
+          call multipole_integrals(basis, dipints, &
+                                   [0.0_dp,0.0_dp,0.0_dp], 1)
+          hcore = hcore + lam*dipints(:,3)
+          deallocate(dipints)
+          write(iw,'(/5x,a,1p,e12.4)') &
+            'UMRSF diagnostic: added z-field lambda =', lam
+        end if
+      end if
+    end block
 
     if (dk.gt.0) call dk_scalar(infos)
 

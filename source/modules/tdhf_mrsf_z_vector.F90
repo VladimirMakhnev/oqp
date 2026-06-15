@@ -1984,6 +1984,7 @@ contains
     !> coupled blocks is the solved Z equation and is printed as a
     !> consistency check (test 5.T2).
     subroutine build_umrsf_p_and_w()
+      use int1, only: multipole_integrals
 
       real(kind=dp), allocatable :: qa(:,:), qb(:,:), hza(:,:), hzb(:,:), &
         wmo(:,:), pmo(:,:), xv(:,:), scr(:,:), hza_zf(:,:), hza_fz(:,:)
@@ -2000,8 +2001,8 @@ contains
     ! blocks (OQP_UMRSF_WCSCALE, default 1) consistently in P, W and H+[Z].
       call scale_ccvv(z_al)
       call scale_ccvv(z_be)
-      call scale_offclass(z_al, nocca)
-      call scale_offclass(z_be, noccb)
+      call scale_offclass(z_al, nocca, 1)
+      call scale_offclass(z_be, noccb, 2)
 
     ! H+[Z_total]: one-sided density C*triu(Z)*C^T (full multiplier), the
     ! same convention as the CPKS operator (usfrogen) so int2_tdgrd produces
@@ -2182,6 +2183,37 @@ contains
         'tr P(beta) - 1 =', trb - 1.0_dp
 
       call flush(iw)
+
+    ! Diagnostic (OQP_UMRSF_DIPCHK): analytic Tr[P z] = relaxed-difference
+    ! dipole_z, to be FD-validated against dE(state)/dlam - dE(scf)/dlam under
+    ! the OQP_UMRSF_FIELDZ one-electron z-field.  This probes the relaxed
+    ! density P directly, defeating the 1e+W vs 2e cancellation.
+      block
+        character(len=8) :: edc
+        call get_environment_variable('OQP_UMRSF_DIPCHK', edc)
+        if (len_trim(edc) > 0) then
+          block
+            real(kind=dp), allocatable :: dipints(:,:)
+            real(kind=dp) :: trz, wk
+            integer :: pp, qq, ij2
+            allocate(dipints(nbf_tri,3), source=0.0_dp)
+            call multipole_integrals(basis, dipints, &
+                                     [0.0_dp,0.0_dp,0.0_dp], 1)
+            trz = 0.0_dp; ij2 = 0
+            do qq = 1, nbf
+              do pp = 1, qq
+                ij2 = ij2 + 1
+                wk = merge(1.0_dp, 2.0_dp, pp==qq)
+                trz = trz + wk*(td_p(ij2,1)+td_p(ij2,2))*dipints(ij2,3)
+              end do
+            end do
+            write(iw,'(5x,a,1p,e18.10)') &
+              'UMRSF analytic Tr[P z] (relaxed-difference dipole_z) =', trz
+            deallocate(dipints)
+          end block
+        end if
+      end block
+
       deallocate(qa, qb, hza, hzb, wmo, pmo, xv, scr)
 
     end subroutine build_umrsf_p_and_w
@@ -2233,13 +2265,19 @@ contains
     !> boundary `no`, different SF-class).  These are the SP-only canonicalization
     !> multipliers (zero at spc=0) untouched by scale_ccvv; isolating them tests
     !> whether their P/W/H+[Z] consumption carries the residual.
-    subroutine scale_offclass(z, no)
+    subroutine scale_offclass(z, no, which)
       real(kind=dp), intent(inout) :: z(:,:)
       integer, intent(in) :: no
+      integer, intent(in), optional :: which  ! 1=alpha C-O, 2=beta O-V
       character(len=16) :: env
-      integer :: p, q, ios, cp, cq
+      integer :: p, q, ios, cp, cq, w
       real(kind=dp) :: s
-      call get_environment_variable('OQP_UMRSF_OFFSCALE', env)
+      w = 0
+      if (present(which)) w = which
+      env = ''
+      if (w == 1) call get_environment_variable('OQP_UMRSF_OFFSCALE_A', env)
+      if (w == 2) call get_environment_variable('OQP_UMRSF_OFFSCALE_B', env)
+      if (len_trim(env) == 0) call get_environment_variable('OQP_UMRSF_OFFSCALE', env)
       if (len_trim(env) == 0) return
       read(env, *, iostat=ios) s
       if (ios /= 0) return
