@@ -26,7 +26,7 @@ contains
     use precision, only: dp
     use io_constants, only: iw
     use constants, only: tol_int
-    use int1, only: omp_hst, multipole_integrals
+    use int1, only: omp_hst
     use basis_tools, only: basis_set
     use printing, only: print_sym_labeled
     use messages, only: show_message, WITH_ABORT
@@ -105,67 +105,6 @@ contains
     tol = log(10.0d0)*tol_int
     call omp_hst(basis, infos%atoms%xyz, infos%atoms%zn - infos%basis%ecp_zn_num, hcore, smat, tmat,&
             logtol=tol, comm=infos%mpiinfo%comm, usempi=infos%mpiinfo%usempi)
-
-!   Diagnostic one-electron z-field perturbation (OQP_UMRSF_FIELDZ=lambda):
-!   adds lambda * <mu|z|nu> to Hcore before SCF, so a central difference of any
-!   state energy w.r.t. lambda yields Tr[D(state) z].  Used to FD-validate the
-!   relaxed difference density P (Tr[P z] = dE(state)/dlam - dE(scf)/dlam).
-    block
-      character(len=32) :: efenv, ecomp
-      real(kind=dp) :: lam
-      real(kind=dp), allocatable :: dipints(:,:)
-      integer :: ios_ef, comp
-      call get_environment_variable('OQP_UMRSF_FIELDZ', efenv)
-      if (len_trim(efenv) > 0) then
-        read(efenv,*,iostat=ios_ef) lam
-        comp = 3   ! 1=X 2=Y 3=Z 4=XX 5=YY 6=ZZ 7=XY 8=XZ 9=YZ
-        call get_environment_variable('OQP_UMRSF_FIELDCOMP', ecomp)
-        if (len_trim(ecomp) > 0) read(ecomp,*,iostat=ios_ef) comp
-        if (ios_ef == 0 .and. lam /= 0.0_dp) then
-          allocate(dipints(nbf2, 9), source=0.0_dp)
-          call multipole_integrals(basis, dipints, &
-                                   [0.0_dp,0.0_dp,0.0_dp], 2)
-          hcore = hcore + lam*dipints(:,comp)
-          deallocate(dipints)
-          write(iw,'(/5x,a,i2,a,1p,e12.4)') &
-            'UMRSF diagnostic: added multipole field comp=', comp, ' lambda =', lam
-        end if
-      end if
-    end block
-
-!   Diagnostic general one-electron perturbation read from a file
-!   (OQP_UMRSF_PERTFILE = path to nbf2 packed reals; OQP_UMRSF_PERTLAM = lambda):
-!   adds lambda * V to Hcore.  Choosing V = C_p C_q^T + C_q C_p^T (an MO-pair
-!   projector built in python from the reference MOs) makes dE/dlambda probe a
-!   specific block of the relaxed density P (per-block FD of P).
-    block
-      character(len=256) :: pfile
-      character(len=32) :: plam
-      real(kind=dp) :: lam
-      real(kind=dp), allocatable :: vpert(:)
-      integer :: ios_p, u_p, k_p
-      call get_environment_variable('OQP_UMRSF_PERTFILE', pfile)
-      call get_environment_variable('OQP_UMRSF_PERTLAM', plam)
-      if (len_trim(pfile) > 0 .and. len_trim(plam) > 0) then
-        read(plam,*,iostat=ios_p) lam
-        if (ios_p == 0 .and. lam /= 0.0_dp) then
-          allocate(vpert(nbf2), source=0.0_dp)
-          open(newunit=u_p, file=trim(pfile), status='old', action='read', &
-               iostat=ios_p)
-          if (ios_p == 0) then
-            do k_p = 1, nbf2
-              read(u_p,*,iostat=ios_p) vpert(k_p)
-              if (ios_p /= 0) exit
-            end do
-            close(u_p)
-            hcore = hcore + lam*vpert
-            write(iw,'(/5x,a,1p,e12.4)') &
-              'UMRSF diagnostic: added file perturbation lambda =', lam
-          end if
-          deallocate(vpert)
-        end if
-      end if
-    end block
 
     if (dk.gt.0) call dk_scalar(infos)
 

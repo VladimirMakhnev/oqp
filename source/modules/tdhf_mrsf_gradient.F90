@@ -44,87 +44,6 @@ module tdhf_mrsf_gradient_mod
 
 contains
 
-  !> Development knob: scale the UMRSF transition-density XX (ball) exchange
-  !> term for finite-difference calibration (OQP_UMRSF_XXSCALE, default 1).
-  function umrsf_xxscale() result(s)
-    real(kind=dp) :: s
-    character(len=32) :: env
-    integer :: ios
-    real(kind=dp) :: v
-    s = 1.0_dp
-    call get_environment_variable('OQP_UMRSF_XXSCALE', env)
-    if (len_trim(env) > 0) then
-      read(env, *, iostat=ios) v
-      if (ios == 0) s = v
-    end if
-  end function umrsf_xxscale
-
-  !> Development knob: scale the UMRSF inter (CO-OV) two-particle density
-  !> term for finite-difference calibration (OQP_UMRSF_INTSCALE, default 1).
-  function umrsf_intscale() result(s)
-    real(kind=dp) :: s
-    character(len=32) :: env
-    integer :: ios
-    real(kind=dp) :: v
-    s = 1.0_dp
-    call get_environment_variable('OQP_UMRSF_INTSCALE', env)
-    if (len_trim(env) > 0) then
-      read(env, *, iostat=ios) v
-      if (ios == 0) s = v
-    end if
-  end function umrsf_intscale
-
-  function umrsf_db1scale() result(s)
-    real(kind=dp) :: s
-    character(len=32) :: env
-    integer :: ios
-    real(kind=dp) :: v
-    s = 1.0_dp
-    call get_environment_variable('OQP_UMRSF_DB1', env)
-    if (len_trim(env) > 0) then
-      read(env, *, iostat=ios) v
-      if (ios == 0) s = v
-    end if
-  end function umrsf_db1scale
-
-  function umrsf_db2scale() result(s)
-    real(kind=dp) :: s
-    character(len=32) :: env
-    integer :: ios
-    real(kind=dp) :: v
-    s = 1.0_dp
-    call get_environment_variable('OQP_UMRSF_DB2', env)
-    if (len_trim(env) > 0) then
-      read(env, *, iostat=ios) v
-      if (ios == 0) s = v
-    end if
-  end function umrsf_db2scale
-
-  function umrsf_intdd() result(s)
-    real(kind=dp) :: s
-    character(len=32) :: env
-    integer :: ios
-    real(kind=dp) :: v
-    s = 1.0_dp
-    call get_environment_variable('OQP_UMRSF_INTDD', env)
-    if (len_trim(env) > 0) then
-      read(env, *, iostat=ios) v
-      if (ios == 0) s = v
-    end if
-  end function umrsf_intdd
-
-  function umrsf_intdc() result(s)
-    real(kind=dp) :: s
-    character(len=32) :: env
-    integer :: ios
-    real(kind=dp) :: v
-    s = 1.0_dp
-    call get_environment_variable('OQP_UMRSF_INTDC', env)
-    if (len_trim(env) > 0) then
-      read(env, *, iostat=ios) v
-      if (ios == 0) s = v
-    end if
-  end function umrsf_intdc
 
   subroutine tdhf_mrsf_gradient_C(c_handle) bind(C, name="tdhf_mrsf_gradient")
     use c_interop, only: oqp_handle_t, oqp_handle_get_info
@@ -292,14 +211,6 @@ contains
     end if
 
 !   Compute 2e gradient
-    block
-      character(len=8) :: e_pg
-      call get_environment_variable('OQP_UMRSF_PRINTG', e_pg)
-      if (len_trim(e_pg) > 0) then
-        write(iw,'(/5x,a)') 'UMRSF grad split: 1e+W contribution (before 2e):'
-        write(iw,'(5x,3f18.10)') transpose(infos%atoms%grad)
-      end if
-    end block
     if (mrst==1 .or. mrst==3) then
       if (umrsf) then
         call umrsf_2e_grad(basis, infos, d, p, spc, v(:,:,1))
@@ -309,15 +220,6 @@ contains
     else if (mrst==5) then
       call sf_2e_grad(basis, infos, d, p, v(:,:,1))
     end if
-
-    block
-      character(len=8) :: e_pg
-      call get_environment_variable('OQP_UMRSF_PRINTG', e_pg)
-      if (len_trim(e_pg) > 0) then
-        write(iw,'(/5x,a)') 'UMRSF grad split: total (after 2e/Gamma):'
-        write(iw,'(5x,3f18.10)') transpose(infos%atoms%grad)
-      end if
-    end block
 
     call print_gradient(infos)
 
@@ -827,7 +729,7 @@ contains
                   + ball(k1,i1)*ball(l1,j1) &
                   + ball(i1,l1)*ball(j1,k1) &
                   + ball(l1,i1)*ball(k1,j1)
-              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*umrsf_xxscale()*dt2
+              df1 = df1-xcfact*dq1-xcfact2*2.0_dp*dt2
             end if
 
             ! Intra CO (co12, mixed set) -- exchange paired.
@@ -846,7 +748,7 @@ contains
                    + co12(i1,l1)*co12(j1,k1) &
                    + co12(l1,j1)*co12(k1,i1) &
                    + co12(k1,j1)*co12(l1,i1)
-              df1 = df1 + sgnk*qfspcp1*umrsf_db1scale()*db1
+              df1 = df1 + sgnk*qfspcp1*db1
             end if
 
             ! Intra OV (o21v, mixed set) -- exchange paired (same fix as CO).
@@ -859,7 +761,7 @@ contains
                    + o21v(i1,l1)*o21v(j1,k1) &
                    + o21v(l1,j1)*o21v(k1,i1) &
                    + o21v(k1,j1)*o21v(l1,i1)
-              df1 = df1 + sgnk*qfspcp2*umrsf_db2scale()*db2
+              df1 = df1 + sgnk*qfspcp2*db2
             end if
 
             ! Inter: 1/2 (alpha + beta) of (2 direct - exchange); each spin
@@ -870,8 +772,7 @@ contains
               dda = inter_dd(bco1a, bco2a, bo2va, bo1va, i1, j1, k1, l1)
               dcb = inter_dc(bco1b, bco2b, bo2vb, bo1vb, i1, j1, k1, l1)
               ddb = inter_dd(bco1b, bco2b, bo2vb, bo1vb, i1, j1, k1, l1)
-              df1 = df1 + sgnk*qfspcp3*0.5_dp*umrsf_intscale()* &
-                    (umrsf_intdd()*(dda+ddb) - umrsf_intdc()*(dca+dcb))
+              df1 = df1 + sgnk*qfspcp3*0.5_dp*((dda+ddb) - (dca+dcb))
             end if
 
             dabmax = max(dabmax, abs(df1))

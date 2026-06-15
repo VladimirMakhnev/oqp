@@ -3742,7 +3742,7 @@ contains
 !>   (L = sum_{p<q} Z_pq F_pq) makes the potential-response density
 !>   D^sigma = 1/2 C (Z + Z^T) C^T, so the MO matrices carry
 !>   M(i,a) = M(a,i) = z_ia/2 (same 1/2 as H+[Z_triv]; fixed by
-!>   devtests/fd_ztriv_test.py).
+!>   the pair-multiplier convention).
   subroutine usfrogen(zma, zmb, zv, noca, nocb)
 
     use precision, only: dp

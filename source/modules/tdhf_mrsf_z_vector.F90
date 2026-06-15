@@ -938,7 +938,7 @@ contains
     inf%tddft%umrsf = previous_umrsf
   end subroutine tdhf_umrsf_gval_C
 
-!> @brief Development/test entry: evaluate the amplitude-quadratic functional
+!> @brief Evaluate the amplitude-quadratic functional
 !>        G[X,X] at frozen response amplitudes with the MO coefficients
 !>        currently stored in the tags (finite-difference fold test 2.T1).
 !>
@@ -986,7 +986,7 @@ contains
     open (unit=iw, file=infos%log_filename, position="append")
 
     if (infos%control%hamilton == 20) then
-      write(iw,'(/x,a)') 'tdhf_umrsf_gval supports HF references only (development FD harness)'
+      write(iw,'(/x,a)') 'tdhf_umrsf_gval supports HF references only'
       call flush(iw)
       call show_message('tdhf_umrsf_gval supports HF references only', with_abort)
     end if
@@ -1146,7 +1146,7 @@ contains
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
       int2_umrsf_data_t, umrsfcbc, umrsfdmat, umrsfqassm, usfrorhs, usfztriv, &
-      usfromcal, umrsfsp, umrsfsp2
+      usfromcal
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -1203,7 +1203,6 @@ contains
   ! UMRSF data kept between the RHS build and the P/W assembly:
   ! fold matrices and the full-MO H+[T] transforms
     real(kind=dp), allocatable :: ha_u(:,:), hb_u(:,:), hpt_a(:,:), hpt_b(:,:)
-    real(kind=dp), allocatable :: ha_base(:,:), hb_base(:,:), xhxa_w(:,:), xhxb_w(:,:)
     real(kind=dp), allocatable, target :: pa(:,:,:)
     integer :: nsocc, lzdim, xvec_dim
 
@@ -1352,9 +1351,8 @@ contains
     call tagarray_get_data(infos%dat, OQP_td_p, td_p)
     call tagarray_get_data(infos%dat, OQP_td_abxc, td_abxc)
 
-    ! Development diagnostics: full R^alpha/R^beta residual matrices, the
-    ! closed-form multipliers and their CPKS feedback rectangles
-    ! (consumed by devtests/fd_fold_test.py and devtests/fd_ztriv_test.py)
+    ! Export the full R^alpha/R^beta residual matrices, the closed-form
+    ! multipliers and their CPKS feedback rectangles as data tags.
     if (umrsf) then
       call infos%dat%remove_records((/ character(len=80) :: &
         OQP_umrsf_r_alpha, OQP_umrsf_r_beta, OQP_umrsf_z_alpha, &
@@ -1469,8 +1467,8 @@ contains
     if (umrsf) then
       call usfromcal(xm, xminv, fa, fb, nocca, noccb)
       call sanitize_zvector_preconditioner(xm, xminv, iw, MRSF_ZVEC_DENOMINATOR_FLOOR, "UMRSF")
-      ! Development diagnostic (test 4.T1): CG silently fails on a
-      ! nonsymmetric operator, so verify <z,Ay> = <y,Az> explicitly.
+      ! CG silently fails on a nonsymmetric operator, so verify the
+      ! operator symmetry <z,Ay> = <y,Az> explicitly.
       call check_umrsf_operator_symmetry()
     else
       call sfromcal(xm, xminv, mo_energy_a, fa, fb, nocca, noccb)
@@ -1529,12 +1527,11 @@ contains
     ! ======================================================================
     if (umrsf) then
       ! Store the coupled multipliers (the within-class blocks are already
-      ! in the tags) and verify the solution residual (test 4.T2).
+      ! in the tags) and report the solution residual.
       call finish_umrsf_zvector()
       ! Relaxed density P = T + Z and the energy-weighted W (Eqs. 96-99).
       call build_umrsf_p_and_w()
-      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: multipliers, P and W assembled (development).'
-      write(iw,'(x,a)')  'The gradient module is enabled in phase 6.'
+      write(iw,'(/x,a)') 'UMRSF-TDDFT Z-vector: multipliers, P and W assembled.'
       call flush(iw)
       call int2_driver%clean()
       if (dft) call dftclean(infos)
@@ -1909,7 +1906,7 @@ contains
 
     end subroutine run_umrsf_cg_zvector
 
-    ! Test 4.T1: explicit operator symmetry check on deterministic
+    ! Explicit operator symmetry check on deterministic
     ! pseudo-random vectors.  CG requires a symmetric (and positive
     ! definite) operator and fails silently otherwise.
     subroutine check_umrsf_operator_symmetry()
@@ -1941,8 +1938,7 @@ contains
 
     ! Store the coupled multipliers into the symmetric Z matrices (the
     ! within-class blocks were filled by usfztriv) and report the true
-    ! solution residual |A*z - rhs| via one extra operator application
-    ! (test 4.T2).
+    ! solution residual |A*z - rhs| via one extra operator application.
     subroutine finish_umrsf_zvector()
 
       integer :: i, k, ij
@@ -1973,7 +1969,7 @@ contains
 
     end subroutine finish_umrsf_zvector
 
-    !> Phase 5: relaxed density P^sigma = T^sigma + Z^sigma (all blocks) and
+    !> Relaxed density P^sigma = T^sigma + Z^sigma (all blocks) and
     !> the energy-weighted W^sigma (theory document Eqs. 96-99).
     !>
     !> Q-table entries: Q^sigma_tu = 2H_tu + 2F_tu[X,X] + [t in occ] H+[T];
@@ -1982,9 +1978,8 @@ contains
     !> cofactor is (1/2) C W_full C^T per spin (W are pair multipliers, same
     !> 1/2 bookkeeping as Z).  The equivalence of the two W forms on the
     !> coupled blocks is the solved Z equation and is printed as a
-    !> consistency check (test 5.T2).
+    !> consistency check.
     subroutine build_umrsf_p_and_w()
-      use int1, only: multipole_integrals
 
       real(kind=dp), allocatable :: qa(:,:), qb(:,:), hza(:,:), hzb(:,:), &
         wmo(:,:), pmo(:,:), xv(:,:), scr(:,:), hza_zf(:,:), hza_fz(:,:)
@@ -1996,13 +1991,6 @@ contains
                hza_zf(nbf,nbf), hza_fz(nbf,nbf), &
                source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
-
-    ! Diagnostic: scale the c_int-driven C-C and V-V within-class multiplier
-    ! blocks (OQP_UMRSF_WCSCALE, default 1) consistently in P, W and H+[Z].
-      call scale_ccvv(z_al)
-      call scale_ccvv(z_be)
-      call scale_offclass(z_al, nocca, 1)
-      call scale_offclass(z_be, noccb, 2)
 
     ! H+[Z_total]: one-sided density C*triu(Z)*C^T (full multiplier), the
     ! same convention as the CPKS operator (usfrogen) so int2_tdgrd produces
@@ -2046,24 +2034,6 @@ contains
       call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
       qa = 2.0_dp*ha_u
       qb = 2.0_dp*hb_u
-      block
-        character(len=8) :: envw
-        call get_environment_variable('OQP_UMRSF_WSP_NEW', envw)
-        if (len_trim(envw) > 0) then
-          block
-            character(len=16) :: envf
-            real(kind=dp) :: wspf
-            integer :: ios2
-            wspf = 1.0_dp
-            call get_environment_variable('OQP_UMRSF_WSPF', envf)
-            if (len_trim(envf) > 0) then
-              read(envf,*,iostat=ios2) wspf
-            end if
-            qa = 2.0_dp*ha_base + wspf*xhxa_w
-            qb = 2.0_dp*hb_base + wspf*xhxb_w
-          end block
-        end if
-      end block
       call dgemm('n','n',nbf,nbf,nbf, &
                   1.0_dp, xv, nbf, &
                           fb, nbf, &
@@ -2083,22 +2053,7 @@ contains
       qa(1:nocca,:) = qa(1:nocca,:) + hpt_a(1:nocca,:)
       qb(1:noccb,:) = qb(1:noccb,:) + hpt_b(1:noccb,:)
 
-    ! Development: overwrite the H tags with Q/2 so the single-sided FD test
-    ! (fd_fold_test.py --mode q) compares dG/de against the FULL fold Q
-    ! (= 2H + 2F[X,X] + H+[T]), not the bare H[X,X].
-      block
-        real(kind=dp), contiguous, pointer :: h_al(:,:), h_be(:,:)
-        integer(4) :: tagid
-        if (infos%dat%has_records((/ character(len=80) :: &
-              OQP_umrsf_h_alpha, OQP_umrsf_h_beta /), tagid) == TA_OK) then
-          call tagarray_get_data(infos%dat, OQP_umrsf_h_alpha, h_al)
-          call tagarray_get_data(infos%dat, OQP_umrsf_h_beta, h_be)
-          h_al = 0.5_dp*qa
-          h_be = 0.5_dp*qb
-        end if
-      end block
-
-    ! Consistency (5.T2): both W forms on the coupled blocks agree iff the
+    ! Consistency: both W forms on the coupled blocks agree iff the
     ! Z equations are solved: max |(Q_pq + eps_q Z + H+_pq[Z]) - (Q_qp + eps_p Z)|
       dev_w = 0.0_dp
       do q = nocca+1, nbf
@@ -2126,7 +2081,7 @@ contains
       call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, fa, nbf, z_al, nbf, 0.0_dp, hza_fz, nbf)
       call build_w_generic(qa, hza_zf, hza_fz, hza, nocca, wmo)
       call orthogonal_transform('t', nbf, mo_a, wmo, scr, xv)
-      scr = umrsf_wscale()*scr
+      scr = -0.25_dp*scr
       do p = 1, nbf
         scr(p,p) = 0.5_dp*scr(p,p)
       end do
@@ -2136,7 +2091,7 @@ contains
       call dgemm('n','n',nbf,nbf,nbf, 1.0_dp, fb, nbf, z_be, nbf, 0.0_dp, hza_fz, nbf)
       call build_w_generic(qb, hza_zf, hza_fz, hzb, noccb, wmo, nocca)
       call orthogonal_transform('t', nbf, mo_b, wmo, scr, xv)
-      scr = umrsf_wscale()*scr
+      scr = -0.25_dp*scr
       do p = 1, nbf
         scr(p,p) = 0.5_dp*scr(p,p)
       end do
@@ -2145,15 +2100,11 @@ contains
 
       call iatogen(bvec_mo_d(:,1), xv, nocca, noccb)
 
-    ! Relaxed densities: the one-particle response cofactor is
-    ! P^sigma = T^sigma + 1/2 Z^sigma (pair-multiplier 1/2, same as in the
-    ! H+ feedback; full-matrix T carries no factor).  The Z scale is
-    ! env-overridable (OQP_UMRSF_PSCALE) for finite-difference calibration.
-    ! Diagnostic OQP_UMRSF_PNOWC: drop the within-class (occ-occ, virt-virt)
-    ! multiplier blocks from P (keep only occ-virt), to test whether the
-    ! within-class multipliers belong in the relaxed density.
-      pmo = umrsf_pscale()*z_al
-      call p_drop_withinclass(pmo, nocca)
+    ! Relaxed difference density P^sigma = T^sigma + 1/2 Z^sigma (the
+    ! pair-multiplier 1/2 matches the H+ feedback convention; the full-matrix
+    ! unrelaxed T carries no factor).  Z^sigma holds all multiplier blocks
+    ! (coupled occ-virt + closed-form off-class/within-class).
+      pmo = 0.5_dp*z_al
       call dgemm('n','t',nbf,nbf,nbf, &
                  -1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2165,8 +2116,7 @@ contains
       call orthogonal_transform('t', nbf, mo_a, pmo, scr, wrk2)
       call pack_matrix(scr, td_p(:,1))
 
-      pmo = umrsf_pscale()*z_be
-      call p_drop_withinclass(pmo, noccb)
+      pmo = 0.5_dp*z_be
       call dgemm('t','n',nbf,nbf,nbf, &
                   1.0_dp, xv, nbf, &
                           xv, nbf, &
@@ -2184,114 +2134,9 @@ contains
 
       call flush(iw)
 
-    ! Diagnostic (OQP_UMRSF_DIPCHK): analytic Tr[P z] = relaxed-difference
-    ! dipole_z, to be FD-validated against dE(state)/dlam - dE(scf)/dlam under
-    ! the OQP_UMRSF_FIELDZ one-electron z-field.  This probes the relaxed
-    ! density P directly, defeating the 1e+W vs 2e cancellation.
-      block
-        character(len=8) :: edc
-        call get_environment_variable('OQP_UMRSF_DIPCHK', edc)
-        if (len_trim(edc) > 0) then
-          block
-            real(kind=dp), allocatable :: dipints(:,:)
-            real(kind=dp) :: trz, wk
-            integer :: pp, qq, ij2, comp2
-            character(len=32) :: ecomp2
-            comp2 = 3
-            call get_environment_variable('OQP_UMRSF_FIELDCOMP', ecomp2)
-            if (len_trim(ecomp2) > 0) read(ecomp2,*) comp2
-            allocate(dipints(nbf_tri,9), source=0.0_dp)
-            call multipole_integrals(basis, dipints, &
-                                     [0.0_dp,0.0_dp,0.0_dp], 2)
-            trz = 0.0_dp; ij2 = 0
-            do qq = 1, nbf
-              do pp = 1, qq
-                ij2 = ij2 + 1
-                wk = merge(1.0_dp, 2.0_dp, pp==qq)
-                trz = trz + wk*(td_p(ij2,1)+td_p(ij2,2))*dipints(ij2,comp2)
-              end do
-            end do
-            write(iw,'(5x,a,i2,a,1p,e18.10)') &
-              'UMRSF analytic Tr[P V] comp=', comp2, ' =', trz
-            deallocate(dipints)
-          end block
-        end if
-      end block
-
       deallocate(qa, qb, hza, hzb, wmo, pmo, xv, scr)
 
     end subroutine build_umrsf_p_and_w
-
-    !> Diagnostic: zero the within-class (occ-occ, virt-virt) blocks of a
-    !> multiplier matrix, keeping only occ-virt, when OQP_UMRSF_PNOWC is set.
-    subroutine p_drop_withinclass(z, no)
-      real(kind=dp), intent(inout) :: z(:,:)
-      integer, intent(in) :: no
-      character(len=8) :: env
-      integer :: p, q
-      call get_environment_variable('OQP_UMRSF_PNOWC', env)
-      if (len_trim(env) == 0) return
-      do q = 1, nbf
-        do p = 1, nbf
-          ! keep only occ(<=no) x virt(>no) and its transpose
-          if (.not. ((p <= no .and. q > no) .or. (p > no .and. q <= no))) &
-            z(p,q) = 0.0_dp
-        end do
-      end do
-    end subroutine p_drop_withinclass
-
-    !> Diagnostic: scale the SAME-CLASS within-class blocks (C-C, O-O, V-V;
-    !> classes C=1..nocb, O=nocb+1..noca, V=noca+1..nbf) of a multiplier
-    !> matrix by OQP_UMRSF_WCSCALE.  These are the pure-gauge within-class
-    !> rotations; the off-class blocks (C-O, C-V, O-V = canonicalization /
-    !> coupled) are left untouched.
-    subroutine scale_ccvv(z)
-      real(kind=dp), intent(inout) :: z(:,:)
-      character(len=16) :: env
-      integer :: p, q, ios, cp, cq
-      real(kind=dp) :: s
-      call get_environment_variable('OQP_UMRSF_WCSCALE', env)
-      if (len_trim(env) == 0) return
-      read(env, *, iostat=ios) s
-      if (ios /= 0) return
-      do q = 1, nbf
-        cq = merge(1, merge(2, 3, q <= nocca), q <= noccb)  ! 1=C,2=O,3=V
-        do p = 1, nbf
-          cp = merge(1, merge(2, 3, p <= nocca), p <= noccb)
-          if (cp == cq) z(p,q) = s*z(p,q)   ! same-class block
-        end do
-      end do
-    end subroutine scale_ccvv
-
-    !> Diagnostic: scale the OFF-class canonicalization within-class multiplier
-    !> blocks by OQP_UMRSF_OFFSCALE -- for the alpha set the C-O occ-occ block,
-    !> for the beta set the O-V virt-virt block (both same side of the occ
-    !> boundary `no`, different SF-class).  These are the SP-only canonicalization
-    !> multipliers (zero at spc=0) untouched by scale_ccvv; isolating them tests
-    !> whether their P/W/H+[Z] consumption carries the residual.
-    subroutine scale_offclass(z, no, which)
-      real(kind=dp), intent(inout) :: z(:,:)
-      integer, intent(in) :: no
-      integer, intent(in) :: which  ! 1=alpha C-O, 2=beta O-V
-      character(len=16) :: env
-      integer :: p, q, ios, cp, cq
-      real(kind=dp) :: s
-      env = ''
-      if (which == 1) call get_environment_variable('OQP_UMRSF_OFFSCALE_A', env)
-      if (which == 2) call get_environment_variable('OQP_UMRSF_OFFSCALE_B', env)
-      if (len_trim(env) == 0) call get_environment_variable('OQP_UMRSF_OFFSCALE', env)
-      if (len_trim(env) == 0) return
-      read(env, *, iostat=ios) s
-      if (ios /= 0) return
-      do q = 1, nbf
-        cq = merge(1, merge(2, 3, q <= nocca), q <= noccb)  ! 1=C,2=O,3=V
-        do p = 1, nbf
-          cp = merge(1, merge(2, 3, p <= nocca), p <= noccb)
-          ! same side of the occ boundary (within-class) but different SF-class
-          if (cp /= cq .and. ((p <= no) .eqv. (q <= no))) z(p,q) = s*z(p,q)
-        end do
-      end do
-    end subroutine scale_offclass
 
     !> One-sided AO density D = C * triu(Z) * C^T from a symmetric MO
     !> multiplier matrix (strict upper triangle = one multiplier per pair).
@@ -2313,99 +2158,43 @@ contains
       deallocate(tri, tmp)
     end subroutine make_oneside_ao
 
-    !> Symmetric energy-weighted W^sigma (MO) per Eq. (96), block form, for a
-    !> possibly non-canonical reference.  Classes: C=1..nocb, O=nocb+1..noca,
-    !> V=noca+1..nbf; occ(sigma)=1..noca_s.  Occupied-side blocks (ij/ix/xy,
-    !> q<=noca): W = Q_pq + (Z F)_pq + [p in occ] H+_pq[Z].  Virtual-touching
-    !> blocks (ia/xa/ab, q in V): the transposed fold and (F Z)_pq, no H+[Z].
-    !> The Fock products zf = Z F and fz = F Z reduce to eps_q Z and eps_p Z
-    !> when the reference is canonical.  Diagonal: 2 W_tt = Q_tt +
-    !> [t in occ] H+_tt[Z] + (Z F)_tt.
+    !> Energy-weighted density W^sigma (MO), block form (Furche-Ahlrichs A13
+    !> generalized to a non-canonical reference; reduces to Lee19 S25 in the
+    !> RO limit).  occ(sigma) = 1..noca_s.  occ-virt block (q virtual, p
+    !> occupied): W_ia = Q_ai + (F^sigma Z^sigma)_ia (occupied-side Fock
+    !> coupling = eps_i Z_ia when canonical).  Same-side blocks (occ-occ
+    !> ij/ix/xy and virt-virt ab/xa/xy): W = Q_pq + (Z^sigma F^sigma)_pq +
+    !> [p,q in occ] H+_pq[Z].  The Fock products zf = Z F and fz = F Z reduce
+    !> to eps Z when the reference is canonical; both are required (dropping
+    !> the same-side Z F product breaks the gradient, verified on the full FD).
     subroutine build_w_generic(qq, zf, fz, hz, noca_s, w, no_lower)
       real(kind=dp), intent(in), dimension(:,:) :: qq, zf, fz, hz
       integer, intent(in) :: noca_s
       real(kind=dp), intent(out), dimension(:,:) :: w
       integer, intent(in), optional :: no_lower  ! O/V boundary within virt (=nocca)
       integer :: p, q, nlo
-      real(kind=dp) :: val, hzs
-      logical :: wxa
-      character(len=8) :: ewxa
-      hzs = umrsf_hzscale()
+      real(kind=dp) :: val
       nlo = noca_s
       if (present(no_lower)) nlo = no_lower
-      call get_environment_variable('OQP_UMRSF_WXATRANS', ewxa)
-      wxa = (len_trim(ewxa) > 0)
       w = 0.0_dp
       do q = 1, nbf
         val = qq(q,q) + zf(q,q)
-        if (q <= noca_s) val = val + hzs*hz(q,q)
+        if (q <= noca_s) val = val + hz(q,q)
         w(q,q) = val
         do p = 1, q-1
-          ! Classify relative to THIS spin's occupied/virtual boundary
-          ! (noca_s): for beta, occ = C only and the SOMOs O are virtual.
           if (q > noca_s .and. p <= noca_s) then
-            ! occ x virt: W_ia = Q_ai + eps_i Z_ia (eq. umrsf-W) = qq(a,i)+(FZ)
+            ! occ x virt block: W_ia = Q_ai + (F^sigma Z^sigma)_ia
             val = qq(q,p) + fz(p,q)
-          else if (wxa .and. q > nlo .and. p > noca_s .and. p <= nlo) then
-            ! beta O-V (off-class canonicalization, O=virt of beta): eq. umrsf-W
-            ! gives W^beta_xa = Q^beta_ax + eps_x Z (TRANSPOSED Q, unlike the
-            ! straight O-O / V-V virt-virt blocks).  p in O (noca_s<p<=nlo),
-            ! q in V (q>nlo).  Gated test of the eq-W transpose for this block.
-            val = qq(q,p) + zf(p,q)
           else
-            ! occupied-occupied (straight + H+[Z]) or virtual-virtual
-            ! (straight, no H+): straight fold, (Z F) Fock product
+            ! occ-occ (+ H+[Z]) or virt-virt: straight fold + (Z F)
             val = qq(p,q) + zf(p,q)
-            if (q <= noca_s) val = val + hzs*hz(p,q)
+            if (q <= noca_s) val = val + hz(p,q)
           end if
           w(p,q) = val
           w(q,p) = val
         end do
       end do
     end subroutine build_w_generic
-
-    !> Global W normalization for the grd1 S-derivative cofactor
-    !> (dens = eijden + 2*wao, AO diagonal halved).  Default -0.25 matches
-    !> the RO post-processing scale; overridable via OQP_UMRSF_WSCALE for
-    !> finite-difference calibration.
-    function umrsf_wscale() result(s)
-      real(kind=dp) :: s
-      character(len=32) :: env
-      integer :: ios
-      real(kind=dp) :: v
-      s = -0.25_dp
-      call get_environment_variable('OQP_UMRSF_WSCALE', env)
-      if (len_trim(env) > 0) then
-        read(env, *, iostat=ios) v
-        if (ios == 0) s = v
-      end if
-    end function umrsf_wscale
-
-    function umrsf_pscale() result(s)
-      real(kind=dp) :: s
-      character(len=32) :: env
-      integer :: ios
-      real(kind=dp) :: v
-      s = 0.5_dp
-      call get_environment_variable('OQP_UMRSF_PSCALE', env)
-      if (len_trim(env) > 0) then
-        read(env, *, iostat=ios) v
-        if (ios == 0) s = v
-      end if
-    end function umrsf_pscale
-
-    function umrsf_hzscale() result(s)
-      real(kind=dp) :: s
-      character(len=32) :: env
-      integer :: ios
-      real(kind=dp) :: v
-      s = 1.0_dp
-      call get_environment_variable('OQP_UMRSF_HZSCALE', env)
-      if (len_trim(env) > 0) then
-        read(env, *, iostat=ios) v
-        if (ios == 0) s = v
-      end if
-    end function umrsf_hzscale
 
     ! Lambda wrapper for preconditioner
     subroutine lambda_precond(x_in, x_out)
@@ -2722,7 +2511,7 @@ contains
       end if
     end subroutine build_mrsf_zvector_rhs
 
-    !> UMRSF (UHF/UKS reference) Z-vector right-hand side, development phase 2:
+    !> UMRSF (UHF/UKS reference) Z-vector right-hand side:
     !> unrelaxed objects, H+[T], spin-pairing fold assembly and the packed
     !> coupled RHS (theory document Eqs. (88)-(92) and Appendix A.3).
     subroutine build_umrsf_zvector_rhs()
@@ -2730,7 +2519,6 @@ contains
       integer :: ok_u
 
       allocate(ha_u(nbf,nbf), hb_u(nbf,nbf), hpt_a(nbf,nbf), hpt_b(nbf,nbf), &
-               ha_base(nbf,nbf), hb_base(nbf,nbf), xhxa_w(nbf,nbf), xhxb_w(nbf,nbf), &
                source=0.0_dp, stat=ok_u)
       if (ok_u/=0) call show_message('Cannot allocate memory', with_abort)
 
@@ -2868,98 +2656,6 @@ contains
       call iatogen(bvec_mo_d(:,1), wrk3, nocca, noccb)
       call umrsfqassm(infos, fmrst2(1,:,:,:), wrk3, mo_a, mo_b, fa, fb, ha_u, hb_u)
 
-    ! W-SP (gated OQP_UMRSF_WSP_NEW): RO-style W folds = base fold (umrsfqassm
-    ! with SP channels zeroed) + dedicated two-set SP W-fold builder umrsfsp.
-      block
-        real(kind=dp), allocatable :: fbase(:,:,:), hspa(:,:), hspb(:,:)
-        character(len=16) :: e1,e2,e3,e4
-        real(kind=dp) :: fco,fov,fint,wsc
-        integer :: io1
-        allocate(fbase(11,nbf,nbf))
-        fbase = fmrst2(1,:,:,:); fbase(1:10,:,:) = 0.0_dp
-        call umrsfqassm(infos, fbase, wrk3, mo_a, mo_b, fa, fb, ha_base, hb_base)
-        deallocate(fbase)
-        ! Closed-form SP W-fold (notes/sp_fold_closed_form.md).  Per-family
-        ! scales sco/sov/sint localize the contribution; wsc is the overall
-        ! Q-coupling factor (Q^sigma = 2(base + wsc*hsp), default wsc=2).
-        ! FD survey (CH2/CH2O/butadiene): every nonzero SP W-fold (this closed
-        ! form OR umrsfqassm's, which are numerically identical) makes the total
-        ! gradient WORSE; wsc=0 (no SP fold in W) is the per-molecule optimum
-        ! (CH2 1.4e-3 -> 1.3e-4).  Default 0; sweepable via OQP_UMRSF_WSC.
-        fco=1.0_dp; fov=1.0_dp; fint=1.0_dp; wsc=0.0_dp
-        call get_environment_variable('OQP_UMRSF_FCO', e1)
-        call get_environment_variable('OQP_UMRSF_FOV', e2)
-        call get_environment_variable('OQP_UMRSF_FINT', e3)
-        call get_environment_variable('OQP_UMRSF_WSC', e4)
-        if (len_trim(e1)>0) read(e1,*,iostat=io1) fco
-        if (len_trim(e2)>0) read(e2,*,iostat=io1) fov
-        if (len_trim(e3)>0) read(e3,*,iostat=io1) fint
-        if (len_trim(e4)>0) read(e4,*,iostat=io1) wsc
-        allocate(hspa(nbf,nbf), hspb(nbf,nbf))
-        call umrsfsp2(hspa, hspb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), &
-                      nocca, noccb, fco, fov, fint)
-        xhxa_w = wsc*hspa
-        xhxb_w = wsc*hspb
-        deallocate(hspa, hspb)
-      end block
-
-    ! V1 gate: the antisymmetric occ-virt part of the closed-form SP fold must
-    ! reproduce the SP part of the FD-validated RHS R (= 2(ha_u - ha_base)
-    ! restricted to the same antisymmetrization).  Printed for calibration.
-      block
-        character(len=8) :: ev1
-        call get_environment_variable('OQP_UMRSF_V1', ev1)
-        if (len_trim(ev1) > 0) then
-          block
-          real(kind=dp), allocatable :: hspa(:,:), hspb(:,:)
-          real(kind=dp) :: da, db, sa, sb, dan, dbn, hh, rr
-          real(kind=dp) :: vco,vov,vint
-          character(len=16) :: g1,g2,g3
-          integer :: i2, a2, gio
-          vco=1.0_dp; vov=1.0_dp; vint=1.0_dp
-          call get_environment_variable('OQP_UMRSF_FCO', g1)
-          call get_environment_variable('OQP_UMRSF_FOV', g2)
-          call get_environment_variable('OQP_UMRSF_FINT', g3)
-          if (len_trim(g1)>0) read(g1,*,iostat=gio) vco
-          if (len_trim(g2)>0) read(g2,*,iostat=gio) vov
-          if (len_trim(g3)>0) read(g3,*,iostat=gio) vint
-          allocate(hspa(nbf,nbf), hspb(nbf,nbf))
-          ! compare the SIGN-CORRECTED fold (-hsp) to the FD-validated R^SP
-          call umrsfsp2(hspa, hspb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), &
-                        nocca, noccb, -vco, -vov, -vint)
-          da=0.0_dp; sa=0.0_dp; dan=0.0_dp
-          do i2 = 1, nocca
-            do a2 = nocca+1, nbf
-              hh = 2.0_dp*(hspa(i2,a2)-hspa(a2,i2))
-              rr = 2.0_dp*((ha_u(i2,a2)-ha_base(i2,a2)) &
-                          -(ha_u(a2,i2)-ha_base(a2,i2)))
-              da  = max(da,  abs(hh - rr))
-              dan = max(dan, abs(-hh - rr))
-              sa  = max(sa,  abs(rr))
-            end do
-          end do
-          db=0.0_dp; sb=0.0_dp; dbn=0.0_dp
-          do i2 = 1, noccb
-            do a2 = noccb+1, nbf
-              hh = 2.0_dp*(hspb(i2,a2)-hspb(a2,i2))
-              rr = 2.0_dp*((hb_u(i2,a2)-hb_base(i2,a2)) &
-                          -(hb_u(a2,i2)-hb_base(a2,i2)))
-              db  = max(db,  abs(hh - rr))
-              dbn = max(dbn, abs(-hh - rr))
-              sb  = max(sb,  abs(rr))
-            end do
-          end do
-          write(iw,'(/5x,a)') 'UMRSF SP-fold V1 gate (antisym occ-virt vs R)'
-          write(iw,'(5x,a,1p,e12.4,3x,a,e12.4,3x,a,e12.4)') &
-            'alpha max|diff|=',da,'(neg)=',dan,'max|R^SP|=',sa
-          write(iw,'(5x,a,1p,e12.4,3x,a,e12.4,3x,a,e12.4)') &
-            'beta  max|diff|=',db,'(neg)=',dbn,'max|R^SP|=',sb
-          call flush(iw)
-          deallocate(hspa, hspb)
-          end block
-        end if
-      end block
-
     ! Free consistency diagnostics (cheap: one extra matvec assembly, no
     ! extra ERI run): the fold-trace identity G = (tr Ha + tr Hb)/2 must
     ! reproduce omega(target), and the converged amplitude must satisfy the
@@ -2989,9 +2685,8 @@ contains
       call usfrorhs(rhs, hpt_a(1:nocca,nocca+1:nbf), hpt_b(1:noccb,noccb+1:nbf), &
                     ha_u, hb_u, r_al, r_be, nocca, noccb)
 
-    ! Export the raw fold matrices H (development: Q = 2H drives the W
-    ! assembly; the single-sided FD test fd_fold_test.py --mode q validates
-    ! the symmetric off-diagonal that R = 2(H - H^T) does not cover)
+    ! Export the raw per-spin fold matrices H as data tags (Q = 2H drives
+    ! the W assembly).
       block
         real(kind=dp), contiguous, pointer :: h_al(:,:), h_be(:,:)
         call infos%dat%remove_records((/ character(len=80) :: &
@@ -3008,7 +2703,7 @@ contains
 
     end subroutine build_umrsf_zvector_rhs
 
-    !> Phase 3: closed-form multipliers Z_triv (Eq. 94) from the stored
+    !> Closed-form within-class/off-class multipliers Z_triv (Eq. 94) from the stored
     !> residual matrices, and their potential response H+[Z_triv] added to
     !> the coupled right-hand side: rhs = -R - H+[Z_triv].
     subroutine build_umrsf_trivial_multipliers()
