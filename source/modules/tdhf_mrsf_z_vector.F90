@@ -2011,6 +2011,7 @@ contains
               beta=infos%dft%cam_beta,&
               mu=infos%dft%cam_mu)
       ab1 => int2_data%apb(:,:,:,1)
+      if (dft) then
       pa = pa*2
       call utddft_fxc( &
           basis = basis, &
@@ -2025,6 +2026,7 @@ contains
           nmtx = 1, &
           threshold = 1.0d-15, &
           infos = infos)
+      end if
       call orthogonal_transform('n', nbf, mo_a, ab1(:,:,1), hza, scr)
       call orthogonal_transform('n', nbf, mo_b, ab1(:,:,2), hzb, scr)
 
@@ -2592,6 +2594,7 @@ contains
               mu=infos%dft%cam_mu)
       ab1 => int2_data%apb(:,:,:,1)
 
+      if (dft) then
       pa = pa*2
       call utddft_fxc( &
           basis = basis, &
@@ -2606,6 +2609,7 @@ contains
           nmtx = 1, &
           threshold = 1.0d-15, &
           infos = infos)
+      end if
 
     ! H+[T] in the full MO basis (the occ x virt rectangles feed the RHS;
     ! the occ x occ blocks are needed later for the W assembly)
@@ -2735,6 +2739,7 @@ contains
               mu=infos%dft%cam_mu)
       ab1 => int2_data%apb(:,:,:,1)
 
+      if (dft) then
       pa = pa*2
       call utddft_fxc( &
           basis = basis, &
@@ -2749,6 +2754,7 @@ contains
           nmtx = 1, &
           threshold = 1.0d-15, &
           infos = infos)
+      end if
 
       call mntoia(ab1(:,:,1), hzt_a, mo_a, mo_a, nocca, nocca)
       call mntoia(ab1(:,:,2), hzt_b, mo_b, mo_b, noccb, noccb)
