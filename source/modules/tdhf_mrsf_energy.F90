@@ -88,6 +88,7 @@ contains
     use mathlib, only: orthogonal_transform, orthogonal_transform_sym, &
       unpack_matrix
     use oqp_linalg
+    use int1, only: multipole_integrals
     use printing, only: print_module_info
     use iso_c_binding, only: c_f_pointer, c_int
 
@@ -120,6 +121,10 @@ contains
     real(kind=dp), allocatable, target :: fmrq1(:,:,:)
     real(kind=dp), allocatable :: dip(:,:,:), bvec_mo_tmp(:), eex(:)
     integer(c_int) , pointer :: ixcore_ptr(:)
+    ! misc-excited-analysis: tagarray exposure of the MRSF densities / dipoles
+    real(kind=dp), pointer :: trden_store(:,:,:), dip_store(:,:,:), dipao_store(:,:)
+    real(kind=dp), allocatable :: mints_exp(:,:)
+    real(kind=dp) :: com_exp(3)
 
     integer :: nocca, nvira, noccb, nvirb
     integer :: nbf, nbf2, xvec_dim
@@ -741,6 +746,33 @@ contains
     end select
 
     call get_transition_dipole(basis, dip, mo_a, trden, nstates)
+
+    ! --- misc-excited-analysis: expose the MRSF state-interaction transition /
+    !     state-difference densities (alpha-MO basis), the transition dipoles,
+    !     and the AO electric-dipole integrals for downstream Python analysis.
+    !     This is a pure write-out; no physics above is altered.
+    call infos%dat%remove_records((/ character(len=80) :: &
+      OQP_td_trans_density_mo, OQP_td_trans_dipole, OQP_td_dip_ao /))
+
+    call infos%dat%reserve_data(OQP_td_trans_density_mo, TA_TYPE_REAL64, &
+      nbf*nbf*nstates*nstates, (/ nbf, nbf, nstates*nstates /), &
+      comment=OQP_td_trans_density_mo_comment)
+    call tagarray_get_data(infos%dat, OQP_td_trans_density_mo, trden_store)
+    trden_store = reshape(trden(:,:,1:nstates,1:nstates), (/ nbf, nbf, nstates*nstates /))
+
+    call infos%dat%reserve_data(OQP_td_trans_dipole, TA_TYPE_REAL64, &
+      3*nstates*nstates, (/ 3, nstates, nstates /), comment=OQP_td_trans_dipole_comment)
+    call tagarray_get_data(infos%dat, OQP_td_trans_dipole, dip_store)
+    dip_store = dip(:,1:nstates,1:nstates)
+
+    allocate(mints_exp(nbf2,3), source=0.0_dp)
+    com_exp = basis%atoms%center(weight='mass')
+    call multipole_integrals(basis, mints_exp, com_exp, 1)
+    call infos%dat%reserve_data(OQP_td_dip_ao, TA_TYPE_REAL64, nbf2*3, &
+      (/ nbf2, 3 /), comment=OQP_td_dip_ao_comment)
+    call tagarray_get_data(infos%dat, OQP_td_dip_ao, dipao_store)
+    dipao_store = mints_exp
+    deallocate(mints_exp)
 
     mrsf_energies = eex(1:nstates)
     bvec_mo_out = bvec_mo(:,1:nstates)

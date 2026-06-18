@@ -12,11 +12,40 @@ Created: Aug 2024
 import os
 import time
 import subprocess
+import multiprocessing
+import multiprocessing.pool
 from typing import List, Dict, Any
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 
 from oqp.pyoqp import Runner
+
+
+# ProcessPoolExecutor only learned the max_tasks_per_child argument in Python
+# 3.11; the cluster module set ships Python 3.9.  A plain multiprocessing.Pool
+# offers maxtasksperchild on every version, but its workers are daemonic and a
+# few tests (numerical Hessian / NAC) themselves spawn child processes, which
+# daemons may not.  A non-daemonic pool with maxtasksperchild=1 reproduces the
+# 3.11 ProcessPoolExecutor semantics: one calculation per fresh worker process
+# (isolation) while still allowing those tests to fork their own children.
+class _NoDaemonProcess(multiprocessing.Process):
+    @property
+    def daemon(self):
+        return False
+
+    @daemon.setter
+    def daemon(self, value):
+        pass
+
+
+class _NoDaemonContext(type(multiprocessing.get_context())):
+    Process = _NoDaemonProcess
+
+
+class NoDaemonPool(multiprocessing.pool.Pool):
+    def __init__(self, *args, **kwargs):
+        kwargs['context'] = _NoDaemonContext()
+        super().__init__(*args, **kwargs)
 
 class OQPTester:
     """
@@ -207,16 +236,16 @@ class OQPTester:
             # same worker can make the later SCF exit after 0 iterations.
             # Use one calculation per child process to preserve test isolation
             # while still allowing tests to run concurrently.
-            with ProcessPoolExecutor(
-                max_workers=self.max_workers,
-                max_tasks_per_child=1,
-            ) as executor:
-                future_to_file = {
-                    executor.submit(self.run_single_test, input_file): input_file
-                    for input_file in input_files
-                }
-                for future in as_completed(future_to_file):
-                    self.results.append(future.result())
+            # One calculation per fresh (non-daemonic) worker process; see
+            # NoDaemonPool above for why this replaces ProcessPoolExecutor
+            # on Python < 3.11.
+            with NoDaemonPool(
+                processes=max(1, self.max_workers),
+                maxtasksperchild=1,
+            ) as pool:
+                self.results.extend(
+                    pool.map(self.run_single_test, input_files)
+                )
 
         self.results.sort(key=lambda x: x['input_file'])
         self.end_time = time.perf_counter()
