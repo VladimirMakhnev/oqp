@@ -50,11 +50,12 @@ pyscf 2.13.1, pytest, h5py.
 - [x] **GATE 6** — GREEN. `pyoqp/oqp/interop/parsers.py` + `compare.py`. cclib parses a
       committed Gaussian TD fixture to 4e-7 eV (≤1e-4); PySCF native TDDFT round-trips to 0;
       OQP-vs-PySCF comparison table renders. Check: `benchmark/_gate6_check.py`. (commit: pending)
-- [~] **GATE 7** — Focused regression (physics-relevant folders): MRSF-TDDFT 2/2, UMRSF 1/1,
-      TDHF 2/2, SOC 2/2 PASS (incl. my patched MRSF path); HF 4/6 — the 2 failures are the
-      **UHF** energy/gradient tests (H2O_UHF-HF_*), a PRE-EXISTING OQP issue (UHF+mult=1 is
-      flagged buggy in oqpdata.py:977-982) on a code path my MRSF-only change never touches.
-      Not a regression. Benchmark driver run_poc.py + results.json/report_table.tex: TODO.
+- [x] **GATE 7** — GREEN. Benchmark `benchmark/run_poc.py` → `results.json` + `report_table.tex`:
+      **41/41 checks pass** across formaldehyde, ethylene, H2/STO-3G (every GATE 2-6 check).
+      Headline: CH2O S1 dark n→π* 4.04 eV (Λ=0.998 local, n_prom=1.04); C2H4 S1 bright π→π*
+      8.30 eV (osc 0.58); H2 FCIDUMP→FCI exact. Figure: `benchmark/figures/ch2o_S1_attach_detach.png`.
+      Regression (focused physics folders): MRSF/UMRSF/TDHF/SOC all PASS (incl. patched path);
+      only failures are UHF-HF (pre-existing OQP bug, oqpdata.py:977-982; independent path). (commit: pending)
 - [ ] GATE 8 — report
 
 ## Current gate & rules in force (self-check after brief re-read)

@@ -1,0 +1,478 @@
+{
+  "metadata": {
+    "basis": "6-31G*",
+    "functional": "BHHLYP",
+    "mrsf_reference": "ROHF triplet (high-spin)",
+    "scf_conv": 1e-08,
+    "td_conv": 1e-08,
+    "fcidump_system": "H2/STO-3G RHF",
+    "geometries_angstrom": {
+      "formaldehyde": "C(0,0,-0.5297) O(0,0,0.6775) H(0,0.9342,-1.124) H(0,-0.9342,-1.124)",
+      "ethylene": "C(0,0,0.6686) C(0,0,-0.6686) H(0,0.9229,1.2372)x2 H(0,0.9229,-1.2372)x2",
+      "H2": "H(0,0,0) H(0,0,0.741)"
+    }
+  },
+  "headline": {
+    "formaldehyde": {
+      "excitation_eV": [
+        0.0,
+        4.041977074673629,
+        8.90745573906418,
+        8.910196499663309
+      ],
+      "target": 1,
+      "target_exc_eV": 4.041977074673629,
+      "osc_0_target": 4.0418666598382455e-28,
+      "n_promoted": 1.0448779998161148,
+      "PR": 2.013650271097791,
+      "lambda": 0.997832710523619,
+      "omega_ct_fraction": 0.34106778687896167,
+      "scf_energy_Ha": -114.30966554966714
+    },
+    "ethylene": {
+      "excitation_eV": [
+        0.0,
+        8.303169450168054,
+        8.418391230422491,
+        9.32512143801896
+      ],
+      "target": 1,
+      "target_exc_eV": 8.303169450168054,
+      "osc_0_target": 0.5772878533989504,
+      "n_promoted": 0.9692980825052278,
+      "PR": 2.0007802325469135,
+      "lambda": 0.9949913454452279,
+      "omega_ct_fraction": 0.9595589141471645,
+      "scf_energy_Ha": -78.37232896658483
+    },
+    "H2_fcidump": {
+      "e_fcidump": -1.137274407020553,
+      "e_pyscf_fci": -1.1372744055291948,
+      "diff": 1.4913581480868743e-09
+    },
+    "interop": {
+      "pyscf_tddft_eV": [
+        4.205438035346674,
+        9.366679998125694,
+        9.834682792539292
+      ]
+    }
+  },
+  "checks": [
+    {
+      "gate": "G2",
+      "molecule": "formaldehyde",
+      "name": "transition_dipole_reconstruction",
+      "value": 2.3314683517128287e-15,
+      "tolerance": 1e-06,
+      "unit": "a.u.",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "formaldehyde",
+      "name": "tdm_traceless",
+      "value": 5.5511151231148286e-17,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "formaldehyde",
+      "name": "state_density_trace_eq_N",
+      "value": 7.105427357601002e-15,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "formaldehyde",
+      "name": "MO_orthonormality",
+      "value": 1.1102230246251565e-14,
+      "tolerance": 1e-08,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "amplitude_vs_keystone",
+      "value": 6.938893903907228e-18,
+      "tolerance": 1e-09,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "nto_sum_sigma2_eq_norm",
+      "value": 2.220446049250313e-16,
+      "tolerance": 1e-10,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "nto_transition_reconstructs_mu",
+      "value": 4.503210918679386e-16,
+      "tolerance": 1e-08,
+      "unit": "a.u.",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "attach_minus_detach_eq_delta",
+      "value": 6.661338147750939e-16,
+      "tolerance": 1e-09,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "TrAS_eq_nprom",
+      "value": 1.7763568394002505e-15,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "TrDS_eq_nprom",
+      "value": 1.5543122344752192e-15,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "participation_ratio_in_range",
+      "value": 2.013650271097791,
+      "tolerance": 9.0,
+      "unit": "pairs",
+      "passed": true,
+      "note": "1<=PR<=9"
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "tozer_lambda_in_0_1",
+      "value": 0.997832710523619,
+      "tolerance": 1.0,
+      "unit": "",
+      "passed": true,
+      "note": "high=local"
+    },
+    {
+      "gate": "G3",
+      "molecule": "formaldehyde",
+      "name": "omega_total_eq_norm",
+      "value": 3.552713678800501e-15,
+      "tolerance": 1e-08,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "formaldehyde",
+      "name": "ao_evaluator_overlap_vs_OQP",
+      "value": 6.661338147750939e-16,
+      "tolerance": 0.001,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "formaldehyde",
+      "name": "cube_state_density_eq_N",
+      "value": 0.0006776245390724966,
+      "tolerance": 0.01,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "formaldehyde",
+      "name": "cube_transition_density_eq_0",
+      "value": 1.4829175214170487e-16,
+      "tolerance": 0.01,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "formaldehyde",
+      "name": "cube_attachment_eq_nprom",
+      "value": 0.002848815632176427,
+      "tolerance": 0.01,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G5",
+      "molecule": "formaldehyde",
+      "name": "qcschema_energy_roundtrip",
+      "value": 0.0,
+      "tolerance": 1e-12,
+      "unit": "Ha",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "ethylene",
+      "name": "transition_dipole_reconstruction",
+      "value": 3.9968028886505635e-15,
+      "tolerance": 1e-06,
+      "unit": "a.u.",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "ethylene",
+      "name": "tdm_traceless",
+      "value": 7.349926446765008e-30,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "ethylene",
+      "name": "state_density_trace_eq_N",
+      "value": 7.105427357601002e-15,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G2",
+      "molecule": "ethylene",
+      "name": "MO_orthonormality",
+      "value": 1.6758658137867038e-14,
+      "tolerance": 1e-08,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "amplitude_vs_keystone",
+      "value": 0.0,
+      "tolerance": 1e-09,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "nto_sum_sigma2_eq_norm",
+      "value": 1.1102230246251565e-15,
+      "tolerance": 1e-10,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "nto_transition_reconstructs_mu",
+      "value": 4.6629367034256575e-15,
+      "tolerance": 1e-08,
+      "unit": "a.u.",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "attach_minus_detach_eq_delta",
+      "value": 8.881784197001252e-16,
+      "tolerance": 1e-09,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "TrAS_eq_nprom",
+      "value": 3.1086244689504383e-15,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "TrDS_eq_nprom",
+      "value": 1.3322676295501878e-15,
+      "tolerance": 1e-06,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "participation_ratio_in_range",
+      "value": 2.0007802325469135,
+      "tolerance": 9.0,
+      "unit": "pairs",
+      "passed": true,
+      "note": "1<=PR<=9"
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "tozer_lambda_in_0_1",
+      "value": 0.9949913454452279,
+      "tolerance": 1.0,
+      "unit": "",
+      "passed": true,
+      "note": "high=local"
+    },
+    {
+      "gate": "G3",
+      "molecule": "ethylene",
+      "name": "omega_total_eq_norm",
+      "value": 2.6645352591003757e-15,
+      "tolerance": 1e-08,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "ethylene",
+      "name": "ao_evaluator_overlap_vs_OQP",
+      "value": 6.661338147750939e-16,
+      "tolerance": 0.001,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "ethylene",
+      "name": "cube_state_density_eq_N",
+      "value": 0.0008031517756883488,
+      "tolerance": 0.01,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "ethylene",
+      "name": "cube_transition_density_eq_0",
+      "value": 2.608776158350079e-07,
+      "tolerance": 0.01,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G4",
+      "molecule": "ethylene",
+      "name": "cube_attachment_eq_nprom",
+      "value": 0.0041141659330669045,
+      "tolerance": 0.01,
+      "unit": "e",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G5",
+      "molecule": "ethylene",
+      "name": "qcschema_energy_roundtrip",
+      "value": 0.0,
+      "tolerance": 1e-12,
+      "unit": "Ha",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G5",
+      "molecule": "H2/STO-3G",
+      "name": "fcidump_fci_vs_pyscf",
+      "value": 1.4913581480868743e-09,
+      "tolerance": 1e-08,
+      "unit": "Ha",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G5",
+      "molecule": "H2/STO-3G",
+      "name": "fcidump_8fold_symmetry",
+      "value": 5.551115123125783e-16,
+      "tolerance": 1e-10,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G5",
+      "molecule": "H2/STO-3G",
+      "name": "oqp_vs_pyscf_Hcore",
+      "value": 1.6402392777337127e-09,
+      "tolerance": 1e-06,
+      "unit": "",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G6",
+      "molecule": "CH2O(Gaussian)",
+      "name": "cclib_excitation_parse",
+      "value": 4.1578100784533945e-07,
+      "tolerance": 0.0001,
+      "unit": "eV",
+      "passed": true,
+      "note": ""
+    },
+    {
+      "gate": "G6",
+      "molecule": "CH2O(PySCF)",
+      "name": "pyscf_native_roundtrip",
+      "value": 0.0,
+      "tolerance": 0.0001,
+      "unit": "eV",
+      "passed": true,
+      "note": ""
+    }
+  ],
+  "summary": {
+    "passed": 41,
+    "total": 41,
+    "all_pass": true
+  }
+}

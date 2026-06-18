@@ -27,6 +27,11 @@ Every file created or edited for this task, with a one-line reason.
   (cclib wrapper for Gaussian/ORCA/Q-Chem outputs; PySCF native reader; tolerance harness).
 - `benchmark/_gate6_check.py`, `benchmark/fixtures/ch2o_gaussian_td.log` — GATE 6 check + fixture.
 
+- `benchmark/run_poc.py` — GATE 7 reproducible benchmark driver (all GATE 2-6 checks over
+  formaldehyde/ethylene/H2); emits `benchmark/results.json` + `benchmark/report_table.tex`.
+- `benchmark/make_figure.py`, `benchmark/figures/ch2o_S1_attach_detach.png` — attach/detach figure.
+- `benchmark/results.json`, `benchmark/report_table.tex` — auto-generated POC results (41/41).
+
 ## Edited existing files
 - `source/tagarray_driver.F90` — added 3 tag-name constants + comments
   (`OQP_td_trans_density_mo`, `OQP_td_trans_dipole`, `OQP_td_dip_ao`) to expose the MRSF
