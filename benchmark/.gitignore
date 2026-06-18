@@ -1,0 +1,8 @@
+benchmark/_runs/
+runs/
+*.cube
+*.log
+build/
+pyoqp/*.egg-info/
+*.pyc
+__pycache__/

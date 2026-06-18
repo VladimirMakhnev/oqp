@@ -18,6 +18,11 @@ Every file created or edited for this task, with a one-line reason.
   transition densities, attach/detach, NTO) + grid-integral trace checks.
 - `benchmark/_gate4_check.py` — GATE 4 self-check harness.
 
+- `pyoqp/oqp/export/qcschema.py` — GATE 5 QCSchema AtomicResult export (+validate).
+- `pyoqp/oqp/export/fcidump.py` — GATE 5 FCIDUMP export (PySCF AO engine in OQP MO basis)
+  + PySCF-FCI round-trip verifier.
+- `benchmark/_gate5_check.py`, `benchmark/inputs/h2_rhf_sto3g.inp` — GATE 5 self-check + input.
+
 ## Edited existing files
 - `source/tagarray_driver.F90` — added 3 tag-name constants + comments
   (`OQP_td_trans_density_mo`, `OQP_td_trans_dipole`, `OQP_td_dip_ao`) to expose the MRSF

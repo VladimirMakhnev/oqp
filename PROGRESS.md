@@ -43,7 +43,10 @@ pyscf 2.13.1, pytest, h5py.
       density, transition density, attach/detach, NTO hole/particle). Trace checks (fine
       0.05-bohr grid): state→16.00068 (N=16, Δ=6.8e-4), transition→5e-17, attach/detach→
       n_promoted (Δ<2e-4), |orbital|²≈1, all ≤1e-2. Check: `benchmark/_gate4_check.py`. (commit: pending)
-- [ ] GATE 5 — QCSchema + FCIDUMP
+- [x] **GATE 5** — GREEN. `pyoqp/oqp/export/qcschema.py` (AtomicResult validates; SCF+state
+      energies round-trip to 0.0) and `fcidump.py` (H2/STO-3G: OQP S/Hcore/E_nuc match PySCF
+      to ~1e-9; 8-fold residual 5.6e-16; **FCIDUMP→PySCF-FCI vs native FCI = 1.49e-9 ≤ 1e-8**).
+      Check: `benchmark/_gate5_check.py`. (commit: pending)
 - [ ] GATE 6 — interop
 - [ ] GATE 7 — regression + benchmark
 - [ ] GATE 8 — report
