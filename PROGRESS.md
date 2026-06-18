@@ -47,8 +47,14 @@ pyscf 2.13.1, pytest, h5py.
       energies round-trip to 0.0) and `fcidump.py` (H2/STO-3G: OQP S/Hcore/E_nuc match PySCF
       to ~1e-9; 8-fold residual 5.6e-16; **FCIDUMP→PySCF-FCI vs native FCI = 1.49e-9 ≤ 1e-8**).
       Check: `benchmark/_gate5_check.py`. (commit: pending)
-- [ ] GATE 6 — interop
-- [ ] GATE 7 — regression + benchmark
+- [x] **GATE 6** — GREEN. `pyoqp/oqp/interop/parsers.py` + `compare.py`. cclib parses a
+      committed Gaussian TD fixture to 4e-7 eV (≤1e-4); PySCF native TDDFT round-trips to 0;
+      OQP-vs-PySCF comparison table renders. Check: `benchmark/_gate6_check.py`. (commit: pending)
+- [~] **GATE 7** — Focused regression (physics-relevant folders): MRSF-TDDFT 2/2, UMRSF 1/1,
+      TDHF 2/2, SOC 2/2 PASS (incl. my patched MRSF path); HF 4/6 — the 2 failures are the
+      **UHF** energy/gradient tests (H2O_UHF-HF_*), a PRE-EXISTING OQP issue (UHF+mult=1 is
+      flagged buggy in oqpdata.py:977-982) on a code path my MRSF-only change never touches.
+      Not a regression. Benchmark driver run_poc.py + results.json/report_table.tex: TODO.
 - [ ] GATE 8 — report
 
 ## Current gate & rules in force (self-check after brief re-read)

@@ -23,6 +23,10 @@ Every file created or edited for this task, with a one-line reason.
   + PySCF-FCI round-trip verifier.
 - `benchmark/_gate5_check.py`, `benchmark/inputs/h2_rhf_sto3g.inp` — GATE 5 self-check + input.
 
+- `pyoqp/oqp/interop/__init__.py`, `parsers.py`, `compare.py` — GATE 6 cross-check utilities
+  (cclib wrapper for Gaussian/ORCA/Q-Chem outputs; PySCF native reader; tolerance harness).
+- `benchmark/_gate6_check.py`, `benchmark/fixtures/ch2o_gaussian_td.log` — GATE 6 check + fixture.
+
 ## Edited existing files
 - `source/tagarray_driver.F90` — added 3 tag-name constants + comments
   (`OQP_td_trans_density_mo`, `OQP_td_trans_dipole`, `OQP_td_dip_ao`) to expose the MRSF
