@@ -32,6 +32,10 @@ Every file created or edited for this task, with a one-line reason.
 - `benchmark/make_figure.py`, `benchmark/figures/ch2o_S1_attach_detach.png` — attach/detach figure.
 - `benchmark/results.json`, `benchmark/report_table.tex` — auto-generated POC results (41/41).
 
+- Overleaf report (separate repo, project 6a3407b308022f03c2a24efc): added standalone
+  `oqp_excited_state_analysis.tex`, copied `report_table.tex` + `ch2o_S1_attach_detach.png`,
+  and wired one `\input` + `amsmath` into the skeleton `main.tex`. Pushed to branch main.
+
 ## Edited existing files
 - `source/tagarray_driver.F90` — added 3 tag-name constants + comments
   (`OQP_td_trans_density_mo`, `OQP_td_trans_dipole`, `OQP_td_dip_ao`) to expose the MRSF

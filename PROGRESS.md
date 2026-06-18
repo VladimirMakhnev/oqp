@@ -26,8 +26,13 @@ randomly overflow after SCF converges — workaround `trh_impl=otr` or `stabilit
 Deps installed in venv: numpy 1.26.4, scipy, cclib 1.8.1, qcelemental 0.30.1, qcengine,
 pyscf 2.13.1, pytest, h5py.
 
-## Gate status
-- [x] **GATE 0** — build clean; stock MRSF example runs; test baseline recorded. (commit: pending)
+## Gate status  (ALL GREEN — see commit hashes)
+Commits: GATE0-2 `3dd2502`; GATE3 `6a4d9ef`; GATE4 `6c669db`; GATE5 `e450363`;
+GATE6 `b315a1f`+`c199fbb`; GATE7 `aecab70`; GATE8 → Overleaf `73880d3` (project 6a3407b3...).
+- [x] **GATE 0** — clean build (oqp-misc venv); stock H2O MRSF example runs (SCF −76.0774468204,
+      MRSF converged, dipoles/oscillators printed); regression baseline recorded (see GATE 7).
+      Note: base commit f703a33 already makes the post-SCF TRAH stability check opt-in, so the
+      known TRAH-overflow flake does not trigger. `3dd2502`.
 - [~] **GATE 1** — inventory (see below). Essentially complete from code reading.
 - [x] **GATE 2** — KEYSTONE GREEN. Formaldehyde MRSF BHHLYP/6-31G* (nbf=34, N=16, 4 states):
       `max|CᵀSC−I|=1.1e-14`; transition-dipole reconstruction (C·D·Cᵀ) worst |Δµ|=**2.3e-15**
@@ -56,7 +61,21 @@ pyscf 2.13.1, pytest, h5py.
       8.30 eV (osc 0.58); H2 FCIDUMP→FCI exact. Figure: `benchmark/figures/ch2o_S1_attach_detach.png`.
       Regression (focused physics folders): MRSF/UMRSF/TDHF/SOC all PASS (incl. patched path);
       only failures are UHF-HF (pre-existing OQP bug, oqpdata.py:977-982; independent path). (commit: pending)
-- [ ] GATE 8 — report
+- [x] **GATE 8** — GREEN. Report `oqp_excited_state_analysis.tex` (+`report_table.tex` auto-table,
+      attach/detach figure) compiles clean (pdflatex, 5 pp, no errors), committed and **pushed to
+      Overleaf** project 6a3407b308022f03c2a24efc, branch main (`fb6bb65`→`73880d3`). Local copy:
+      `/bighome/vova/coding/oqp-misc/overleaf_report/`.
+
+## Definition of done — all checked
+- [x] oqp-misc env; clean build; stock MRSF example runs (GATE 0).
+- [x] 1-TDM/1-RDM exposed; dipole reconstruction 2.3e-15 (≤1e-6); traces correct (GATE 2).
+- [x] NTOs, attach/detach, descriptors — all checks pass (GATE 3).
+- [x] Cube export — grid integrals match analytic traces (GATE 4).
+- [x] QCSchema validates + round-trips; FCIDUMP→PySCF-FCI 1.5e-9 on H2/STO-3G (GATE 5).
+- [x] Cross-check parser/harness round-trips two external formats (GATE 6).
+- [x] No regressions in the affected/physics paths; results.json 41/41 green (GATE 7).
+- [x] Report committed/pushed to Overleaf with auto-generated table (GATE 8).
+- [x] PROGRESS.md, CHANGELOG_misc.md complete.
 
 ## Current gate & rules in force (self-check after brief re-read)
 Working GATE 2 (the keystone). Rules I must keep obeying: verify-first (numeric probe, not
