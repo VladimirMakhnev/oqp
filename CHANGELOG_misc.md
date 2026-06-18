@@ -14,6 +14,10 @@ Every file created or edited for this task, with a one-line reason.
   installs/imports as `oqp.analysis`.)
 - `benchmark/_gate3_check.py` — GATE 3 numeric self-check harness.
 
+- `pyoqp/oqp/export/__init__.py`, `cubegen.py` — GATE 4 Gaussian-cube export (MO, state/
+  transition densities, attach/detach, NTO) + grid-integral trace checks.
+- `benchmark/_gate4_check.py` — GATE 4 self-check harness.
+
 ## Edited existing files
 - `source/tagarray_driver.F90` — added 3 tag-name constants + comments
   (`OQP_td_trans_density_mo`, `OQP_td_trans_dipole`, `OQP_td_dip_ao`) to expose the MRSF

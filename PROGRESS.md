@@ -39,7 +39,10 @@ pyscf 2.13.1, pytest, h5py.
       Tr(A·S)=Tr(D·S)=n_promoted≈1; PR∈[1,Npair]; Λ=0.998 (local, low-CT ✓); Ω total=||X||².
       Self-contained GTO evaluator: analytic overlap matches OQP S to 6.7e-16, grid-S 2.6e-4
       at 0.06 bohr (≤1e-3). Check: `benchmark/_gate3_check.py`. (commit: pending)
-- [ ] GATE 4 — cube export (evaluator ready in gto_grid.py)
+- [x] **GATE 4** — GREEN. `pyoqp/oqp/export/cubegen.py` writes Gaussian cubes (MO, state
+      density, transition density, attach/detach, NTO hole/particle). Trace checks (fine
+      0.05-bohr grid): state→16.00068 (N=16, Δ=6.8e-4), transition→5e-17, attach/detach→
+      n_promoted (Δ<2e-4), |orbital|²≈1, all ≤1e-2. Check: `benchmark/_gate4_check.py`. (commit: pending)
 - [ ] GATE 5 — QCSchema + FCIDUMP
 - [ ] GATE 6 — interop
 - [ ] GATE 7 — regression + benchmark
