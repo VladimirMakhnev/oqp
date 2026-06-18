@@ -33,8 +33,13 @@ pyscf 2.13.1, pytest, h5py.
       `max|CᵀSC−I|=1.1e-14`; transition-dipole reconstruction (C·D·Cᵀ) worst |Δµ|=**2.3e-15**
       ≤1e-6 (Cᵀ·D·C orientation → 3.8, wrong); all TDMs traceless (~1e-17);
       `Tr(γⁿ_AO·S)=16.000000=N` (worst 7e-15). Check: `benchmark/_gate2_check.py`. (commit: pending)
-- [ ] GATE 3 — analysis modules
-- [ ] GATE 4 — cube export
+- [x] **GATE 3** — GREEN on formaldehyde S1 (n→π*) and ethylene S1. `pyoqp/oqp/analysis/`:
+      transition_density, nto, density_diff, descriptors, gto_grid. Amplitude extraction
+      validated against the keystone to ~1e-17; NTO-trans reconstructs µ to 4e-16; A−D=Δ,
+      Tr(A·S)=Tr(D·S)=n_promoted≈1; PR∈[1,Npair]; Λ=0.998 (local, low-CT ✓); Ω total=||X||².
+      Self-contained GTO evaluator: analytic overlap matches OQP S to 6.7e-16, grid-S 2.6e-4
+      at 0.06 bohr (≤1e-3). Check: `benchmark/_gate3_check.py`. (commit: pending)
+- [ ] GATE 4 — cube export (evaluator ready in gto_grid.py)
 - [ ] GATE 5 — QCSchema + FCIDUMP
 - [ ] GATE 6 — interop
 - [ ] GATE 7 — regression + benchmark
