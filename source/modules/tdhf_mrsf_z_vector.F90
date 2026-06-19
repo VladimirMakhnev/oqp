@@ -796,7 +796,7 @@ contains
     use tdhf_lib, only: int2_tdgrd_data_t
     use tdhf_mrsf_lib, only: usfrogen, usfrolhs
     use mod_dft_gridint_fxc, only: utddft_fxc
-    use mathlib, only: orthogonal_transform
+    use mathlib, only: orthogonal_transform, symmetrize_matrix
     use mod_dft_molgrid, only: dft_grid_t
     use tdhf_lib, only: mntoia
 
@@ -850,7 +850,14 @@ contains
     ab1 => int2_data%apb(:,:,:,1)
 
     if (dft) then
-      gmres_pa = gmres_pa*2
+      ! BUGFIX: feed utddft_fxc the SYMMETRIC perturbation density (= one-sided
+      ! + its transpose), matching the validated RO path (apply_z_operator).
+      ! The previous `gmres_pa*2` gives the same rho^pert VALUE but a WRONG
+      ! grad-rho^pert for GGA (compRDRho's 2*aoG1.(D aoV) assumes D symmetric;
+      ! a one-sided D makes aoG1_k aoV_l asymmetric in k,l) -> the (A+B) orbital
+      ! Hessian loses self-adjointness (DFT-scaled). Symmetrizing restores it.
+      call symmetrize_matrix(gmres_pa(:,:,1), nbf)
+      call symmetrize_matrix(gmres_pa(:,:,2), nbf)
       call utddft_fxc( &
           basis = basis, &
           molGrid = molGrid, &
@@ -2012,7 +2019,12 @@ contains
               mu=infos%dft%cam_mu)
       ab1 => int2_data%apb(:,:,:,1)
       if (dft) then
-      pa = pa*2
+      ! BUGFIX (W-build H+[Z]): symmetric perturbation density for the GGA fxc,
+      ! matching apply_z_operator_umrsf. make_oneside_ao gives a ONE-SIDED density;
+      ! the old `pa*2` corrupts grad-rho^pert (compRDRho assumes symmetric D) ->
+      ! wrong energy-weighted W -> wrong -S^xi W gradient term (DFT-scaled).
+      call symmetrize_matrix(pa(:,:,1), nbf)
+      call symmetrize_matrix(pa(:,:,2), nbf)
       call utddft_fxc( &
           basis = basis, &
           molGrid = molGrid, &
@@ -2740,7 +2752,10 @@ contains
       ab1 => int2_data%apb(:,:,:,1)
 
       if (dft) then
-      pa = pa*2
+      ! BUGFIX (H+[Z_triv]): symmetric perturbation density for the GGA fxc
+      ! (make_oneside_ao is one-sided); consistent with the operator / W builds.
+      call symmetrize_matrix(pa(:,:,1), nbf)
+      call symmetrize_matrix(pa(:,:,2), nbf)
       call utddft_fxc( &
           basis = basis, &
           molGrid = molGrid, &
