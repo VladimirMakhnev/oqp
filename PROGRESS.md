@@ -60,7 +60,11 @@ GATE6 `b315a1f`+`c199fbb`; GATE7 `aecab70`; GATE8 → Overleaf `73880d3` (projec
       Headline: CH2O S1 dark n→π* 4.04 eV (Λ=0.998 local, n_prom=1.04); C2H4 S1 bright π→π*
       8.30 eV (osc 0.58); H2 FCIDUMP→FCI exact. Figure: `benchmark/figures/ch2o_S1_attach_detach.png`.
       Regression (focused physics folders): MRSF/UMRSF/TDHF/SOC all PASS (incl. patched path);
-      only failures are UHF-HF (pre-existing OQP bug, oqpdata.py:977-982; independent path). (commit: pending)
+      only failures are UHF-HF (pre-existing OQP bug, oqpdata.py:977-982; independent path).
+      FULL example suite (233 tests, isolated-subprocess runner `runs/full_seq2.py`):
+      **223 PASS, 8 FAIL, 2 indeterminate**. All 8 failures are UHF (DFT/HF/other UHF energy+grad)
+      — the pre-existing UHF+mult=1 bug; 2 NOSTATUS are PCM/ddX (parser couldn't classify). **All 95
+      excited-state/MRSF/SF/TDDFT/SOC/EKT/XAS tests PASS.** Record: `benchmark/regression_full.json`.
 - [x] **GATE 8** — GREEN. Report `oqp_excited_state_analysis.tex` (+`report_table.tex` auto-table,
       attach/detach figure) compiles clean (pdflatex, 5 pp, no errors), committed and **pushed to
       Overleaf** project 6a3407b308022f03c2a24efc, branch main (`fb6bb65`→`73880d3`). Local copy:
