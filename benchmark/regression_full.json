@@ -20,24 +20,34 @@
     "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/DFT/H2O_ROHF-DFT_GRADIENT.json    PyOQP checking atoms                ... passed (0."
   },
   {
+    "test": "DFT/H2O_UHF-DFT_ENERGY.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/DFT/H2O_UHF-DFT_ENERGY.json    PyOQP checking atoms                ... passed (0.000"
+  },
+  {
+    "test": "DFT/H2O_UHF-DFT_GRADIENT.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/DFT/H2O_UHF-DFT_GRADIENT.json    PyOQP checking atoms                ... passed (0.0"
+  },
+  {
     "test": "ECP/C2H4_BHHLYP-MRSFTDDFT_Energy.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/C2H4_BHHLYP-MRSFTDDFT_Energy.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/C2H4_BHHLYP-MRSFTDDFT_Energy.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "ECP/C2H4_BHHLYP-MRSFTDDFT_Grad.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/C2H4_BHHLYP-MRSFTDDFT_Grad.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/C2H4_BHHLYP-MRSFTDDFT_Grad.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "ECP/Custom_Basis-Set/C2H4_Custom_Basis-Set-MRSFTDDFT_Energy.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/Custom_Basis-Set/C2H4_Custom_Basis-Set-MRSFTDDFT_Energy.json    PyOQP checking O"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/Custom_Basis-Set/C2H4_Custom_Basis-Set-MRSFTDDFT_Energy.json    PyOQP checking a"
   },
   {
     "test": "ECP/HBr_BHHLYP-MRSFTDDFT_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/HBr_BHHLYP-MRSFTDDFT_ENERGY.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/HBr_BHHLYP-MRSFTDDFT_ENERGY.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "ECP/HBr_RHF-DFT_ENERGY.inp",
@@ -57,7 +67,7 @@
   {
     "test": "ECP/NaCl_BHHLYP-MRSFTDDFT_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/NaCl_BHHLYP-MRSFTDDFT_ENERGY.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/ECP/NaCl_BHHLYP-MRSFTDDFT_ENERGY.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "ECP/NaCl_RHF-DFT_GRADIENT.inp",
@@ -67,7 +77,7 @@
   {
     "test": "HESS/H2O_BHHLYP-MRSFTDDFT_NUM_HESS.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HESS/H2O_BHHLYP-MRSFTDDFT_NUM_HESS.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HESS/H2O_BHHLYP-MRSFTDDFT_NUM_HESS.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "HESS/H2O_RHF-DFT_ANA_HESS.inp",
@@ -98,6 +108,16 @@
     "test": "HF/H2O_ROHF-HF_GRADIENT.inp",
     "status": "PASSED",
     "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HF/H2O_ROHF-HF_GRADIENT.json    PyOQP checking atoms                ... passed (0.00"
+  },
+  {
+    "test": "HF/H2O_UHF-HF_ENERGY.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HF/H2O_UHF-HF_ENERGY.json    PyOQP checking atoms                ... passed (0.00000"
+  },
+  {
+    "test": "HF/H2O_UHF-HF_GRADIENT.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HF/H2O_UHF-HF_GRADIENT.json    PyOQP checking atoms                ... passed (0.000"
   },
   {
     "test": "ISPHER/H2O_BHHLYP-MRSFTDDFT_GRADIENT_F_SHELL_ISPHER.inp",
@@ -132,12 +152,12 @@
   {
     "test": "MRSF-TDDFT/H2O_BHHLYP-MRSFTDDFT_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/MRSF-TDDFT/H2O_BHHLYP-MRSFTDDFT_ENERGY.json    PyOQP checking OQP::td_energies     ."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/MRSF-TDDFT/H2O_BHHLYP-MRSFTDDFT_ENERGY.json    PyOQP checking atoms                ."
   },
   {
     "test": "MRSF-TDDFT/H2O_BHHLYP-MRSFTDDFT_GRADIENT.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/MRSF-TDDFT/H2O_BHHLYP-MRSFTDDFT_GRADIENT.json    PyOQP checking OQP::td_energies    "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/MRSF-TDDFT/H2O_BHHLYP-MRSFTDDFT_GRADIENT.json    PyOQP checking atoms               "
   },
   {
     "test": "NMR/CH3_ROHF-DFT-PBE0-GIAO-NMR.inp",
@@ -177,32 +197,32 @@
   {
     "test": "OPT/C2H4_BHHLYP-MRSFTDDFT_MECI.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MECI.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MECI.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "OPT/C2H4_BHHLYP-MRSFTDDFT_MECI_GEOMETRIC.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MECI_GEOMETRIC.json    PyOQP checking OQP::td_energies    "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MECI_GEOMETRIC.json    PyOQP checking atoms               "
   },
   {
     "test": "OPT/C2H4_BHHLYP-MRSFTDDFT_MECP_GEOMETRIC.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MECP_GEOMETRIC.json    PyOQP checking OQP::td_energies    "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MECP_GEOMETRIC.json    PyOQP checking atoms               "
   },
   {
     "test": "OPT/C2H4_BHHLYP-MRSFTDDFT_MEP.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MEP.json    PyOQP checking OQP::td_energies     ... passed"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_MEP.json    PyOQP checking atoms                ... passed"
   },
   {
     "test": "OPT/C2H4_BHHLYP-MRSFTDDFT_TCI_OQP.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_TCI_OQP.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/C2H4_BHHLYP-MRSFTDDFT_TCI_OQP.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "OPT/H2O_BHHLYP-MRSFTDDFT_OPTIMIZE.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/H2O_BHHLYP-MRSFTDDFT_OPTIMIZE.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/H2O_BHHLYP-MRSFTDDFT_OPTIMIZE.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "OPT/H2O_RHF-DFT_OPTIMIZE.inp",
@@ -222,7 +242,7 @@
   {
     "test": "OPT/HCN_BHHLYP-MRSFTDDFT_TS_GEOMETRIC.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/HCN_BHHLYP-MRSFTDDFT_TS_GEOMETRIC.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/HCN_BHHLYP-MRSFTDDFT_TS_GEOMETRIC.json    PyOQP checking atoms                .."
   },
   {
     "test": "OPT/HCN_RHF-DFT_CONSTRAINED_GEOMETRIC.inp",
@@ -248,6 +268,41 @@
     "test": "OPT/HCN_RHF-DFT_TS_GEOMETRIC.inp",
     "status": "PASSED",
     "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/OPT/HCN_RHF-DFT_TS_GEOMETRIC.json    PyOQP checking atoms                ... passed "
+  },
+  {
+    "test": "PERF/H2O_DFT_perf1.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data is not found (skip and save data) "
+  },
+  {
+    "test": "PERF/H2O_MRSF_perf1.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data is not found (skip and save data) "
+  },
+  {
+    "test": "PERF/H2O_MRSF_perf2_override.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data is not found (skip and save data) "
+  },
+  {
+    "test": "PROP/H2O_BHHLYP_PROPERTIES.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/PROP/H2O_BHHLYP_PROPERTIES.json    PyOQP checking atoms                ... passed (0"
+  },
+  {
+    "test": "PROP/H2O_CATION_UHF_PROPERTIES.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/PROP/H2O_CATION_UHF_PROPERTIES.json    PyOQP checking atoms                ... passe"
+  },
+  {
+    "test": "PROP/H2O_RHF_PROPERTIES.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/PROP/H2O_RHF_PROPERTIES.json    PyOQP checking atoms                ... passed (0.00"
+  },
+  {
+    "test": "QUANTUM/h2.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data is not found (skip and save data) "
   },
   {
     "test": "SCF/h2o_rhf_6-31g_pbe_adiis.inp",
@@ -407,42 +462,42 @@
   {
     "test": "SF-TDDFT/H2O_BHHLYP-SFTDDFT_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SF-TDDFT/H2O_BHHLYP-SFTDDFT_ENERGY.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SF-TDDFT/H2O_BHHLYP-SFTDDFT_ENERGY.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "SF-TDDFT/H2O_BHHLYP-SFTDDFT_GRADIENT.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SF-TDDFT/H2O_BHHLYP-SFTDDFT_GRADIENT.json    PyOQP checking OQP::td_energies     ..."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SF-TDDFT/H2O_BHHLYP-SFTDDFT_GRADIENT.json    PyOQP checking atoms                ..."
   },
   {
     "test": "SOC/CH3Br-BHHLYP-SOC.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SOC/CH3Br-BHHLYP-SOC.json    PyOQP checking OQP::td_energies     ... passed (0.00000"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SOC/CH3Br-BHHLYP-SOC.json    PyOQP checking atoms                ... passed (0.00000"
   },
   {
     "test": "SOC/H2O_BHHLYP_SOC.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SOC/H2O_BHHLYP_SOC.json    PyOQP checking OQP::td_energies     ... passed (0.0000000"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/SOC/H2O_BHHLYP_SOC.json    PyOQP checking atoms                ... passed (0.0000000"
   },
   {
     "test": "TDDFT/H2O_B3LYP5-TDDFT_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDDFT/H2O_B3LYP5-TDDFT_ENERGY.json    PyOQP checking OQP::td_energies     ... passed"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDDFT/H2O_B3LYP5-TDDFT_ENERGY.json    PyOQP checking atoms                ... passed"
   },
   {
     "test": "TDDFT/H2O_B3LYP5-TDDFT_GRADIENT.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDDFT/H2O_B3LYP5-TDDFT_GRADIENT.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDDFT/H2O_B3LYP5-TDDFT_GRADIENT.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "TDHF/H2O_TDHF_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDHF/H2O_TDHF_ENERGY.json    PyOQP checking OQP::td_energies     ... passed (0.00000"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDHF/H2O_TDHF_ENERGY.json    PyOQP checking atoms                ... passed (0.00000"
   },
   {
     "test": "TDHF/H2O_TDHF_GRADIENT.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDHF/H2O_TDHF_GRADIENT.json    PyOQP checking OQP::td_energies     ... passed (0.000"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TDHF/H2O_TDHF_GRADIENT.json    PyOQP checking atoms                ... passed (0.000"
   },
   {
     "test": "TRAH/H2O_RHF-DFT_GRAD_TRAH.inp",
@@ -452,7 +507,7 @@
   {
     "test": "TRAH/H2O_ROHF-DFT_GRAD_TRAH.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TRAH/H2O_ROHF-DFT_GRAD_TRAH.json    PyOQP checking OQP::td_energies     ... passed ("
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TRAH/H2O_ROHF-DFT_GRAD_TRAH.json    PyOQP checking atoms                ... passed ("
   },
   {
     "test": "TRAH/H2O_UHF-DFT_GRAD_TRAH.inp",
@@ -462,22 +517,22 @@
   {
     "test": "TRAH/h2o_rohf_mrsf-t_6-31g_prop.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TRAH/h2o_rohf_mrsf-t_6-31g_prop.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/TRAH/h2o_rohf_mrsf-t_6-31g_prop.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "UMRSF-TDDFT/C4H6_BHHLYP_UMRSFTDDFT_ENERGY.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/UMRSF-TDDFT/C4H6_BHHLYP_UMRSFTDDFT_ENERGY.json    PyOQP checking OQP::td_energies   "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/UMRSF-TDDFT/C4H6_BHHLYP_UMRSFTDDFT_ENERGY.json    PyOQP checking atoms              "
   },
   {
     "test": "XAS/MRSF/HCN_MRSF.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/XAS/MRSF/HCN_MRSF.json    PyOQP checking OQP::td_energies     ... passed (0.00001950"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/XAS/MRSF/HCN_MRSF.json    PyOQP checking atoms                ... passed (0.00000000"
   },
   {
     "test": "XAS/delta-CHP-MRSF/HCN_CHP-MRSF_v2.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/XAS/delta-CHP-MRSF/HCN_CHP-MRSF_v2.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/XAS/delta-CHP-MRSF/HCN_CHP-MRSF_v2.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "XAS/delta-CHP-MRSF/HCN_DFT.inp",
@@ -502,7 +557,7 @@
   {
     "test": "other/h2o_nacme_rohf_mrsf-s_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_nacme_rohf_mrsf-s_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies    "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_nacme_rohf_mrsf-s_6-31g_bhhlyp.json    PyOQP checking atoms               "
   },
   {
     "test": "other/h2o_rhf_3-21g_minao.inp",
@@ -562,142 +617,142 @@
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_b3lypv5.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_bhhlyp.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passed "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_hf.json    PyOQP checking atoms                ... passed "
   },
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_m06-2x.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... passed"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_pbe.json    PyOQP checking atoms                ... passed"
   },
   {
     "test": "other/h2o_rhf_rpa-s_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_slater.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-s_6-31g_slater.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_b3lypv5.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_bhhlyp.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passed "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_hf.json    PyOQP checking atoms                ... passed "
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_m06-2x.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... passed"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_pbe.json    PyOQP checking atoms                ... passed"
   },
   {
     "test": "other/h2o_rhf_rpa-t_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_slater.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_rpa-t_6-31g_slater.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_b3lypv5.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_bhhlyp.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passed "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_hf.json    PyOQP checking atoms                ... passed "
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_m06-2x.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... passed"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_pbe.json    PyOQP checking atoms                ... passed"
   },
   {
     "test": "other/h2o_rhf_tda-s_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_slater.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-s_6-31g_slater.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_b3lypv5.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_bhhlyp.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passed "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_hf.json    PyOQP checking atoms                ... passed "
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_m06-2x.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... passed"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_pbe.json    PyOQP checking atoms                ... passed"
   },
   {
     "test": "other/h2o_rhf_tda-t_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_slater.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rhf_tda-t_6-31g_slater.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rohf-dft_energy_init_scf.inp",
@@ -752,312 +807,312 @@
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_b3lypv5.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_bhhlyp.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_cam-b3lyp.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dt-bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dt-bhhlyp.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dt-bhhlyp.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dt-vee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dt-vee.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dt-vee.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-aee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-aee.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-aee.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-b3lyp.json    PyOQP checking OQP::td_energies     "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-b3lyp.json    PyOQP checking atoms                "
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-stg.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-stg.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-stg.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-tune.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-tune.json    PyOQP checking OQP::td_energies     ."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-tune.json    PyOQP checking atoms                ."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-vaee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-vaee.json    PyOQP checking OQP::td_energies     ."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-vaee.json    PyOQP checking atoms                ."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-vee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-vee.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-vee.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-xi.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-xi.json    PyOQP checking OQP::td_energies     ..."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-xi.json    PyOQP checking atoms                ..."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_dtcam-xiv.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-xiv.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_dtcam-xiv.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_hf.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_m06-2x.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_pbe.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "other/h2o_rohf_mrsf-q_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_slater.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-q_6-31g_slater.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_b3lypv5.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-coco.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-coco.json    PyOQP checking OQP::td_energies "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-coco.json    PyOQP checking atoms            "
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-coov.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-coov.json    PyOQP checking OQP::td_energies "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-coov.json    PyOQP checking atoms            "
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-ovov.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-ovov.json    PyOQP checking OQP::td_energies "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp-spc-ovov.json    PyOQP checking atoms            "
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_bhhlyp.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_cam-b3lyp.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dt-bhhlyp-spc.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dt-bhhlyp-spc.json    PyOQP checking OQP::td_energies   "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dt-bhhlyp-spc.json    PyOQP checking atoms              "
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dt-bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dt-bhhlyp.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dt-bhhlyp.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dt-vee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dt-vee.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dt-vee.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-aee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-aee.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-aee.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-b3lyp.json    PyOQP checking OQP::td_energies     "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-b3lyp.json    PyOQP checking atoms                "
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-stg.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-stg.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-stg.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-tune.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-tune.json    PyOQP checking OQP::td_energies     ."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-tune.json    PyOQP checking atoms                ."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-vaee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-vaee.json    PyOQP checking OQP::td_energies     ."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-vaee.json    PyOQP checking atoms                ."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-vee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-vee.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-vee.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-xi.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-xi.json    PyOQP checking OQP::td_energies     ..."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-xi.json    PyOQP checking atoms                ..."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_dtcam-xiv.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-xiv.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_dtcam-xiv.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_hf.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_m06-2x.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_pbe.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_prop.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_prop.json    PyOQP checking OQP::td_energies     ... pas"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_prop.json    PyOQP checking atoms                ... pas"
   },
   {
     "test": "other/h2o_rohf_mrsf-s_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_slater.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-s_6-31g_slater.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_b3lypv5.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_bhhlyp.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_cam-b3lyp.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_dt-bhhlyp-spc.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dt-bhhlyp-spc.json    PyOQP checking OQP::td_energies   "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dt-bhhlyp-spc.json    PyOQP checking atoms              "
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_dt-bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dt-bhhlyp.json    PyOQP checking OQP::td_energies     .."
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dt-bhhlyp.json    PyOQP checking atoms                .."
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_dt-vee.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dt-vee.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dt-vee.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_dtcam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dtcam-b3lyp.json    PyOQP checking OQP::td_energies     "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_dtcam-b3lyp.json    PyOQP checking atoms                "
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_hf.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_m06-2x.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_pbe.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_slater.json    PyOQP checking OQP::td_energies     ... p"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_slater.json    PyOQP checking atoms                ... p"
   },
   {
     "test": "other/h2o_rohf_mrsf-t_6-31g_stg1x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_stg1x.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf-t_6-31g_stg1x.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rohf_mrsf_ekt_ea_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf_ekt_ea_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf_ekt_ea_6-31g_bhhlyp.json    PyOQP checking atoms                "
   },
   {
     "test": "other/h2o_rohf_mrsf_ekt_ip_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf_ekt_ip_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_mrsf_ekt_ip_6-31g_bhhlyp.json    PyOQP checking atoms                "
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_b3lypv5.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_b3lypv5.json    PyOQP checking OQP::td_energies     ... pass"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_b3lypv5.json    PyOQP checking atoms                ... pass"
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_bhhlyp.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_bhhlyp.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_cam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_cam-b3lyp.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_dt-bhhlyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_dt-bhhlyp.json    PyOQP checking OQP::td_energies     ... pa"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_dt-bhhlyp.json    PyOQP checking atoms                ... pa"
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_dtcam-b3lyp.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_dtcam-b3lyp.json    PyOQP checking OQP::td_energies     ... "
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_dtcam-b3lyp.json    PyOQP checking atoms                ... "
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_hf.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_hf.json    PyOQP checking OQP::td_energies     ... passed (0"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_hf.json    PyOQP checking atoms                ... passed (0"
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_m06-2x.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_m06-2x.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_m06-2x.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_pbe.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_pbe.json    PyOQP checking OQP::td_energies     ... passed ("
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_pbe.json    PyOQP checking atoms                ... passed ("
   },
   {
     "test": "other/h2o_rohf_sf_6-31g_slater.inp",
     "status": "PASSED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_slater.json    PyOQP checking OQP::td_energies     ... passe"
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_rohf_sf_6-31g_slater.json    PyOQP checking atoms                ... passe"
   },
   {
     "test": "other/h2o_uhf-s_6-31g_b3lypv5.inp",
@@ -1105,6 +1160,26 @@
     "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_b3lypv5.json    PyOQP checking atoms                ... passed"
   },
   {
+    "test": "other/h2o_uhf-t_6-31g_bhhlyp.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_bhhlyp.json    PyOQP checking atoms                ... passed "
+  },
+  {
+    "test": "other/h2o_uhf-t_6-31g_cam-b3lyp.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... pass"
+  },
+  {
+    "test": "other/h2o_uhf-t_6-31g_hf.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_hf.json    PyOQP checking atoms                ... passed (0.0"
+  },
+  {
+    "test": "other/h2o_uhf-t_6-31g_m06-2x.inp",
+    "status": "PASSED",
+    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_m06-2x.json    PyOQP checking atoms                ... passed "
+  },
+  {
     "test": "other/h2o_uhf-t_6-31g_pbe.inp",
     "status": "PASSED",
     "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_pbe.json    PyOQP checking atoms                ... passed (0."
@@ -1113,46 +1188,6 @@
     "test": "other/h2o_uhf-t_6-31g_slater.inp",
     "status": "PASSED",
     "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_slater.json    PyOQP checking atoms                ... passed "
-  },
-  {
-    "test": "DFT/H2O_UHF-DFT_ENERGY.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/DFT/H2O_UHF-DFT_ENERGY.json    PyOQP checking atoms                ... passed (0.000"
-  },
-  {
-    "test": "DFT/H2O_UHF-DFT_GRADIENT.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/DFT/H2O_UHF-DFT_GRADIENT.json    PyOQP checking atoms                ... passed (0.0"
-  },
-  {
-    "test": "HF/H2O_UHF-HF_ENERGY.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HF/H2O_UHF-HF_ENERGY.json    PyOQP checking atoms                ... passed (0.00000"
-  },
-  {
-    "test": "HF/H2O_UHF-HF_GRADIENT.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/HF/H2O_UHF-HF_GRADIENT.json    PyOQP checking atoms                ... passed (0.000"
-  },
-  {
-    "test": "other/h2o_uhf-t_6-31g_bhhlyp.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_bhhlyp.json    PyOQP checking atoms                ... passed "
-  },
-  {
-    "test": "other/h2o_uhf-t_6-31g_cam-b3lyp.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_cam-b3lyp.json    PyOQP checking atoms                ... pass"
-  },
-  {
-    "test": "other/h2o_uhf-t_6-31g_hf.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_hf.json    PyOQP checking atoms                ... passed (0.0"
-  },
-  {
-    "test": "other/h2o_uhf-t_6-31g_m06-2x.inp",
-    "status": "FAILED",
-    "note": "   PyOQP reference data /bighome/vova/coding/oqp-misc/openqp/share/examples/other/h2o_uhf-t_6-31g_m06-2x.json    PyOQP checking atoms                ... passed "
   },
   {
     "test": "PCM/H2O_RHF-HF_DDPCM_ENERGY_ISPHER.inp",
