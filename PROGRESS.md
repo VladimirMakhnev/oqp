@@ -141,3 +141,10 @@ Validation plan: reconstruct µ^{1→n} = −Tr(C trden_mo Cᵀ · r_ao) and mat
 ## Reference numbers (H2O BHHLYP/6-31G* MRSF, stock example, --omp 1)
 SCF total = −76.0774468204. MRSF S0 (root1) = −76.3609364927. Transition dipoles (printed, a.u.):
 1→2 (0.1790,0.1790,0) |µ|=0.2532 osc 0.0140 @8.947 eV; 2→3 (−1.2950,1.2950,0) |µ|=1.8315 osc 0.1303.
+
+## Full suite on merged base (toolkit_density = upstream main + this work)
+240 examples, isolated-subprocess runner (runs/full_seq2.py): **238 PASS, 0 FAIL,
+2 PCM/ddX crashes (ERROR STOP, pre-existing — crash identically on the original base)**.
+All 97 excited-state/MRSF/SF/TDDFT/SOC/EKT/XAS tests PASS. Zero new failures vs the
+original base; the 8 UHF failures on the old base now PASS (upstream fixed UHF+mult=1).
+Record: benchmark/regression_full.json.
